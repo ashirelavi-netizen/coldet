@@ -7,9 +7,15 @@
 
 ;;; ─── נתיב התוסף (נקבע בזמן טעינה) ──────────────────────────
 (setq *cdt-lsp-dir*
-  (if (findfile "COLDET.lsp")
-    (vl-filename-directory (findfile "COLDET.lsp"))
-    nil))
+  (cond
+    ; אם תיקיית coldet בנתיבי החיפוש של ZWCAD
+    ((findfile "COLDET.lsp")
+     (vl-filename-directory (findfile "COLDET.lsp")))
+    ; גיבוי: בניית הנתיב לפי USERPROFILE
+    ((findfile (strcat (getenv "USERPROFILE")
+                       "\\Desktop\\claude\\Acad\\coldet\\COLDET.lsp"))
+     (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\coldet"))
+    (t nil)))
 
 ;;; ─── קבועים ─────────────────────────────────────────────────
 (setq CDT:MAX-SPACING 18.0)   ; רווח מקסימלי בין דונאטים
