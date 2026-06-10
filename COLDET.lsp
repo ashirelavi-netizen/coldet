@@ -1,6 +1,6 @@
 ;;; ============================================================
 ;;; COLDET.lsp — Column Detail Generator for ZCAD / AutoCAD
-;;; Version 1.0
+;;; Version 1.1 — DCL settings dialog
 ;;; ============================================================
 
 (vl-load-com)
@@ -435,97 +435,222 @@
   (cdt:draw-text-center (list cx y2) h2 style2 txt2 layer 0))
 
 ;;; ============================================================
-;;; L. הגדרות ראשוניות
+;;; L. חלון הגדרות — DCL Dialog
 ;;; ============================================================
 
-(defun cdt:first-run (/ cfg ent ed res choice)
-  (setq cfg (cdt:defaults))
-  (princ "\n====  COLDET — הגדרות ראשוניות  ====")
+(defun cdt:lsp-dir ()
+  (if (findfile "COLDET.lsp")
+    (vl-filename-directory (findfile "COLDET.lsp"))
+    nil))
 
-  ;; 1. גיאומטריה חיצונית
-  (princ "\n\n--- 1. גיאומטריה חיצונית ---")
-  (setq res (cdt:pick-or-type-layer "הצבע על קו חוץ" "שם שכבה" "0"))
-  (if res (setq cfg (cdt:set! cfg "ext-layer" res)))
+; Write cfg values into the currently-open dialog tiles
+(defun cdt:dialog-write (cfg)
+  (set_tile "ext_layer"     (or (cdt:get cfg "ext-layer")     ""))
+  (set_tile "int_layer"     (or (cdt:get cfg "int-layer")     ""))
+  (set_tile "int_offset"    (or (cdt:get cfg "int-offset")    ""))
+  (set_tile "donut_layer"   (or (cdt:get cfg "donut-layer")   ""))
+  (set_tile "donut_size"    (or (cdt:get cfg "donut-size")    ""))
+  (set_tile "leader_text"   (or (cdt:get cfg "leader-text")   ""))
+  (set_tile "dim_layer"     (or (cdt:get cfg "dim-layer")     ""))
+  (set_tile "dim_style"     (or (cdt:get cfg "dim-style")     ""))
+  (set_tile "dim_scale"     (or (cdt:get cfg "dim-scale")     ""))
+  (set_tile "title_layer"   (or (cdt:get cfg "title-layer")   ""))
+  (set_tile "title_style1"  (or (cdt:get cfg "title-style1")  ""))
+  (set_tile "title_height1" (or (cdt:get cfg "title-height1") ""))
+  (set_tile "title_style2"  (or (cdt:get cfg "title-style2")  ""))
+  (set_tile "title_height2" (or (cdt:get cfg "title-height2") ""))
+  (set_tile "title_lweight" (or (cdt:get cfg "title-lweight") ""))
+  (set_tile "stirrup_layer" (or (cdt:get cfg "stirrup-layer") "")))
 
-  ;; 2. גיאומטריה פנימית
-  (princ "\n\n--- 2. גיאומטריה פנימית ---")
-  (setq res (cdt:pick-or-type-layer "הצבע על קו פנים" "שם שכבה" "0"))
-  (if res (setq cfg (cdt:set! cfg "int-layer" res)))
-  (setq res (getdist "\nערך אופסט: "))
-  (if res (setq cfg (cdt:set! cfg "int-offset" (rtos res 2 4))))
-
-  ;; 3. דונאטים
-  (princ "\n\n--- 3. דונאטים ---")
-  (setq res (cdt:pick-or-type-layer "הצבע על דונאט" "שם שכבה" "0"))
-  (if res (setq cfg (cdt:set! cfg "donut-layer" res)))
-  (setq res (getdist "\nגודל דונאט (קוטר): "))
-  (if res (setq cfg (cdt:set! cfg "donut-size" (rtos res 2 4))))
-  (princ "\nטקסט ליידר:")
-  (initget "Block Text Type")
-  (setq choice (getkword "\n  [בלוק/טקסט/הקלדה] <הקלדה>: "))
-  (cond
-    ((= choice "Block")
-     (princ "\nהצבע על הבלוק: ")
-     (setq ent (car (entsel)))
-     (if ent (setq cfg (cdt:set! cfg "leader-text"
-                          (cdr (assoc 2 (entget ent)))))))
-    ((= choice "Text")
-     (princ "\nהצבע על הטקסט: ")
-     (setq ent (car (entsel)))
-     (if ent (setq cfg (cdt:set! cfg "leader-text"
-                          (cdr (assoc 1 (entget ent)))))))
-    (t
-     (setq res (getstring t "\nהזן טקסט ליידר: "))
-     (if res (setq cfg (cdt:set! cfg "leader-text" res)))))
-
-  ;; 4. מידות
-  (princ "\n\n--- 4. מידות ---")
-  (princ "\nהצבע על מידה קיימת: ")
-  (setq ent (car (entsel)))
-  (if ent
-    (progn
-      (setq ed (entget ent))
-      (setq cfg (cdt:set! cfg "dim-layer" (cdr (assoc 8 ed))))
-      (if (assoc 3 ed)
-        (setq cfg (cdt:set! cfg "dim-style" (cdr (assoc 3 ed)))))))
-  (setq res (getreal "\nקנה מידה (מספר, למשל 50 עבור 1:50): "))
-  (if res (setq cfg (cdt:set! cfg "dim-scale" (rtos res 2 4))))
-
-  ;; 5. כותרת
-  (princ "\n\n--- 5. כותרת ---")
-  (setq res (cdt:pick-or-type-layer "הצבע על שכבת כותרת" "שם שכבה" "0"))
-  (if res (setq cfg (cdt:set! cfg "title-layer" res)))
-
-  (setq res (cdt:pick-text-height-style "\nהצבע על טקסט לגודל שורה 1"))
-  (if res
-    (progn
-      (setq cfg (cdt:set! cfg "title-style1"  (car res)))
-      (setq cfg (cdt:set! cfg "title-height1" (rtos (cadr res) 2 4))))
-    (progn
-      (setq res (getreal "\nגובה שורה 1: "))
-      (if res (setq cfg (cdt:set! cfg "title-height1" (rtos res 2 4))))))
-
-  (setq res (cdt:pick-text-height-style "\nהצבע על טקסט לגודל שורה 2"))
-  (if res
-    (progn
-      (setq cfg (cdt:set! cfg "title-style2"  (car res)))
-      (setq cfg (cdt:set! cfg "title-height2" (rtos (cadr res) 2 4))))
-    (progn
-      (setq res (getreal "\nגובה שורה 2: "))
-      (if res (setq cfg (cdt:set! cfg "title-height2" (rtos res 2 4))))))
-
-  (setq res (cdt:input-or-pick-lweight
-              "עובי קו מפריד — הצבע על קו" "הזן עובי (מ\"מ)"))
-  (if res (setq cfg (cdt:set! cfg "title-lweight" (itoa res))))
-
-  ;; 6. צורה סמלית
-  (princ "\n\n--- 6. צורה סמלית (אוגן) ---")
-  (setq res (cdt:pick-or-type-layer "הצבע על שכבת האוגן" "שם שכבה" "0"))
-  (if res (setq cfg (cdt:set! cfg "stirrup-layer" res)))
-
-  (cdt:save cfg)
-  (princ "\n✓ הגדרות נשמרו.\n")
+; Read all tile values from the open dialog into cfg
+(defun cdt:dialog-read (cfg)
+  (setq cfg (cdt:set! cfg "ext-layer"     (get_tile "ext_layer")))
+  (setq cfg (cdt:set! cfg "int-layer"     (get_tile "int_layer")))
+  (setq cfg (cdt:set! cfg "int-offset"    (get_tile "int_offset")))
+  (setq cfg (cdt:set! cfg "donut-layer"   (get_tile "donut_layer")))
+  (setq cfg (cdt:set! cfg "donut-size"    (get_tile "donut_size")))
+  (setq cfg (cdt:set! cfg "leader-text"   (get_tile "leader_text")))
+  (setq cfg (cdt:set! cfg "dim-layer"     (get_tile "dim_layer")))
+  (setq cfg (cdt:set! cfg "dim-style"     (get_tile "dim_style")))
+  (setq cfg (cdt:set! cfg "dim-scale"     (get_tile "dim_scale")))
+  (setq cfg (cdt:set! cfg "title-layer"   (get_tile "title_layer")))
+  (setq cfg (cdt:set! cfg "title-style1"  (get_tile "title_style1")))
+  (setq cfg (cdt:set! cfg "title-height1" (get_tile "title_height1")))
+  (setq cfg (cdt:set! cfg "title-style2"  (get_tile "title_style2")))
+  (setq cfg (cdt:set! cfg "title-height2" (get_tile "title_height2")))
+  (setq cfg (cdt:set! cfg "title-lweight" (get_tile "title_lweight")))
+  (setq cfg (cdt:set! cfg "stirrup-layer" (get_tile "stirrup_layer")))
   cfg)
+
+(defun cdt:settings-dialog (cfg-in / dlg-id status done ent ed res ldir)
+  (setq *cdt-dlg-vals* cfg-in
+        done            nil
+        status          0)
+
+  ; Try to load DCL from support path, then from LSP directory
+  (setq dlg-id (load_dialog "COLDET"))
+  (if (< dlg-id 0)
+    (progn
+      (setq ldir (cdt:lsp-dir))
+      (if ldir
+        (setq dlg-id (load_dialog (strcat ldir "\\COLDET.dcl"))))))
+
+  (if (< dlg-id 0)
+    (princ "\nשגיאה: לא נמצא COLDET.dcl — בדוק שהקובץ בתיקיית coldet.\n")
+
+    (progn
+      (while (not done)
+        (if (not (new_dialog "coldet_settings" dlg-id))
+          (setq done T)
+          (progn
+            (cdt:dialog-write *cdt-dlg-vals*)
+
+            ; Each pick button: save tile state → close dialog with pick code
+            (action_tile "btn_ext"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 2)")
+            (action_tile "btn_int"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 3)")
+            (action_tile "btn_dlay" "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 4)")
+            (action_tile "btn_dsz"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 5)")
+            (action_tile "btn_ltxt" "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 6)")
+            (action_tile "btn_dim"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 7)")
+            (action_tile "btn_tlay" "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 8)")
+            (action_tile "btn_tt1"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 9)")
+            (action_tile "btn_tt2"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 10)")
+            (action_tile "btn_tlw"  "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 11)")
+            (action_tile "btn_stir" "(setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))(done_dialog 12)")
+
+            (setq status (start_dialog))
+
+            (cond
+
+              ; 0 = Cancel
+              ((= status 0)
+               (setq done T))
+
+              ; 1 = OK
+              ((= status 1)
+               (setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))
+               (cdt:save *cdt-dlg-vals*)
+               (princ "\n✓ הגדרות נשמרו.")
+               (setq done T))
+
+              ; 2 — pick external geometry layer
+              ((= status 2)
+               (setq res (cdt:pick-layer "הצבע על קו גיאומטריה חיצונית"))
+               (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "ext-layer" res))))
+
+              ; 3 — pick internal geometry layer
+              ((= status 3)
+               (setq res (cdt:pick-layer "הצבע על קו גיאומטריה פנימית"))
+               (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "int-layer" res))))
+
+              ; 4 — pick donut layer
+              ((= status 4)
+               (setq res (cdt:pick-layer "הצבע על דונאט קיים"))
+               (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "donut-layer" res))))
+
+              ; 5 — pick donut size from existing donut (radius × 2 = diameter)
+              ((= status 5)
+               (princ "\nהצבע על דונאט קיים לקריאת גודל: ")
+               (setq ent (car (entsel)))
+               (if (and ent (assoc 40 (entget ent)))
+                 (setq *cdt-dlg-vals*
+                   (cdt:set! *cdt-dlg-vals* "donut-size"
+                     (rtos (* 2.0 (cdr (assoc 40 (entget ent)))) 2 4)))))
+
+              ; 6 — pick leader text (block / text entity / free type)
+              ((= status 6)
+               (initget "Block Text Type")
+               (setq res (getkword "\nסוג טקסט ליידר [Block/Text/Type] <Type>: "))
+               (cond
+                 ((= res "Block")
+                  (princ "\nהצבע על הבלוק: ")
+                  (setq ent (car (entsel)))
+                  (if (and ent (assoc 2 (entget ent)))
+                    (setq *cdt-dlg-vals*
+                      (cdt:set! *cdt-dlg-vals* "leader-text"
+                        (cdr (assoc 2 (entget ent)))))))
+                 ((= res "Text")
+                  (princ "\nהצבע על הטקסט: ")
+                  (setq ent (car (entsel)))
+                  (if (and ent (assoc 1 (entget ent)))
+                    (setq *cdt-dlg-vals*
+                      (cdt:set! *cdt-dlg-vals* "leader-text"
+                        (cdr (assoc 1 (entget ent)))))))
+                 (t
+                  (setq res (getstring t "\nהזן טקסט ליידר: "))
+                  (if (and res (not (= res "")))
+                    (setq *cdt-dlg-vals*
+                      (cdt:set! *cdt-dlg-vals* "leader-text" res))))))
+
+              ; 7 — pick dimension → reads layer + dimstyle
+              ((= status 7)
+               (princ "\nהצבע על מידה קיימת: ")
+               (setq ent (car (entsel)))
+               (if ent
+                 (progn
+                   (setq ed (entget ent))
+                   (setq *cdt-dlg-vals*
+                     (cdt:set! *cdt-dlg-vals* "dim-layer" (cdr (assoc 8 ed))))
+                   (if (assoc 3 ed)
+                     (setq *cdt-dlg-vals*
+                       (cdt:set! *cdt-dlg-vals* "dim-style"
+                         (cdr (assoc 3 ed))))))))
+
+              ; 8 — pick title layer
+              ((= status 8)
+               (setq res (cdt:pick-layer "הצבע על אובייקט שכבת כותרת"))
+               (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "title-layer" res))))
+
+              ; 9 — pick title row-1 style + height from text entity
+              ((= status 9)
+               (princ "\nהצבע על טקסט לגודל שורה 1: ")
+               (setq ent (car (entsel)))
+               (if ent
+                 (progn
+                   (setq ed (entget ent))
+                   (if (assoc 7 ed)
+                     (setq *cdt-dlg-vals*
+                       (cdt:set! *cdt-dlg-vals* "title-style1" (cdr (assoc 7 ed)))))
+                   (if (assoc 40 ed)
+                     (setq *cdt-dlg-vals*
+                       (cdt:set! *cdt-dlg-vals* "title-height1"
+                         (rtos (cdr (assoc 40 ed)) 2 4)))))))
+
+              ; 10 — pick title row-2 style + height from text entity
+              ((= status 10)
+               (princ "\nהצבע על טקסט לגודל שורה 2: ")
+               (setq ent (car (entsel)))
+               (if ent
+                 (progn
+                   (setq ed (entget ent))
+                   (if (assoc 7 ed)
+                     (setq *cdt-dlg-vals*
+                       (cdt:set! *cdt-dlg-vals* "title-style2" (cdr (assoc 7 ed)))))
+                   (if (assoc 40 ed)
+                     (setq *cdt-dlg-vals*
+                       (cdt:set! *cdt-dlg-vals* "title-height2"
+                         (rtos (cdr (assoc 40 ed)) 2 4)))))))
+
+              ; 11 — pick separator line weight from line entity
+              ((= status 11)
+               (princ "\nהצבע על קו לקריאת עובי: ")
+               (setq ent (car (entsel)))
+               (if (and ent (assoc 370 (entget ent)))
+                 (setq *cdt-dlg-vals*
+                   (cdt:set! *cdt-dlg-vals* "title-lweight"
+                     (itoa (cdr (assoc 370 (entget ent))))))))
+
+              ; 12 — pick stirrup layer
+              ((= status 12)
+               (setq res (cdt:pick-layer "הצבע על אובייקט שכבת האוגן"))
+               (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "stirrup-layer" res))))))))
+
+      (unload_dialog dlg-id)))
+
+  (if (= status 1) *cdt-dlg-vals* cfg-in))
+
+(defun cdt:first-run ()
+  (cdt:settings-dialog (or (cdt:load) (cdt:defaults))))
 
 ;;; ============================================================
 ;;; M. הפקודה הראשית — C:COLDET
@@ -549,7 +674,7 @@
   (cond
     ;; המשתמש בחר Settings
     ((= sel "Settings")
-     (setq cfg (cdt:first-run)))
+     (setq cfg (cdt:settings-dialog cfg)))
 
     ;; לא נבחר כלום
     ((null sel)
@@ -638,5 +763,5 @@
   (princ))
 
 ;;; ─── הודעת טעינה ─────────────────────────────────────────────
-(princ "\nCOLDET 1.0 טעון. הפעל: COLDET\n")
+(princ "\nCOLDET 1.1 טעון. הפעל: COLDET\n")
 (princ)
