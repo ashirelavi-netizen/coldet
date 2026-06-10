@@ -5,6 +5,12 @@
 
 (vl-load-com)
 
+;;; ─── נתיב התוסף (נקבע בזמן טעינה) ──────────────────────────
+(setq *cdt-lsp-dir*
+  (if (findfile "COLDET.lsp")
+    (vl-filename-directory (findfile "COLDET.lsp"))
+    nil))
+
 ;;; ─── קבועים ─────────────────────────────────────────────────
 (setq CDT:MAX-SPACING 18.0)   ; רווח מקסימלי בין דונאטים
 (setq CDT:INSET        1.0)   ; מרחק דונאט מהגיאומטריה הפנימית
@@ -442,10 +448,7 @@
 ;;; L. חלון הגדרות — DCL Dialog
 ;;; ============================================================
 
-(defun cdt:lsp-dir ()
-  (if (findfile "COLDET.lsp")
-    (vl-filename-directory (findfile "COLDET.lsp"))
-    nil))
+(defun cdt:lsp-dir () *cdt-lsp-dir*)
 
 ; Write cfg values into the currently-open dialog tiles
 (defun cdt:dialog-write (cfg)
@@ -665,12 +668,10 @@
 (defun cdt:first-run (/ saved merged)
   (setq saved (cdt:load))
   (if saved
-    ; קובץ ישן קיים — ממזג עם ברירות מחדל חדשות ושומר בשקט
     (progn
       (setq merged (cdt:merge-cfg saved (cdt:defaults)))
       (cdt:save merged)
       merged)
-    ; אין קובץ כלל — פותח חלון הגדרות
     (cdt:settings-dialog (cdt:defaults))))
 
 ;;; ============================================================
