@@ -537,34 +537,30 @@
 
             (cond
 
-              ; 0 = Cancel
-              ((= status 0)
+              ; Cancel — 0 או nil
+              ((or (null status) (equal status 0))
                (setq done T))
 
-              ; 1 = OK
-              ((= status 1)
+              ; OK — 1 או T (ZWCAD מחזיר T)
+              ((or (equal status T) (equal status 1))
                (setq *cdt-dlg-vals* (cdt:dialog-read *cdt-dlg-vals*))
                (cdt:save *cdt-dlg-vals*)
                (princ "\n✓ הגדרות נשמרו.")
                (setq done T))
 
-              ; 2 — pick external geometry layer
-              ((= status 2)
+              ((equal status 2)
                (setq res (cdt:pick-layer "הצבע על קו גיאומטריה חיצונית"))
                (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "ext-layer" res))))
 
-              ; 3 — pick internal geometry layer
-              ((= status 3)
+              ((equal status 3)
                (setq res (cdt:pick-layer "הצבע על קו גיאומטריה פנימית"))
                (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "int-layer" res))))
 
-              ; 4 — pick donut layer
-              ((= status 4)
+              ((equal status 4)
                (setq res (cdt:pick-layer "הצבע על דונאט קיים"))
                (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "donut-layer" res))))
 
-              ; 5 — pick donut size from existing donut (radius × 2 = diameter)
-              ((= status 5)
+              ((equal status 5)
                (princ "\nהצבע על דונאט קיים לקריאת גודל: ")
                (setq ent (car (entsel)))
                (if (and ent (assoc 40 (entget ent)))
@@ -572,19 +568,18 @@
                    (cdt:set! *cdt-dlg-vals* "donut-size"
                      (rtos (* 2.0 (cdr (assoc 40 (entget ent)))) 2 4)))))
 
-              ; 6 — pick leader text (block / text entity / free type)
-              ((= status 6)
+              ((equal status 6)
                (initget "Block Text Type")
                (setq res (getkword "\nסוג טקסט ליידר [Block/Text/Type] <Type>: "))
                (cond
-                 ((= res "Block")
+                 ((equal res "Block")
                   (princ "\nהצבע על הבלוק: ")
                   (setq ent (car (entsel)))
                   (if (and ent (assoc 2 (entget ent)))
                     (setq *cdt-dlg-vals*
                       (cdt:set! *cdt-dlg-vals* "leader-text"
                         (cdr (assoc 2 (entget ent)))))))
-                 ((= res "Text")
+                 ((equal res "Text")
                   (princ "\nהצבע על הטקסט: ")
                   (setq ent (car (entsel)))
                   (if (and ent (assoc 1 (entget ent)))
@@ -593,12 +588,11 @@
                         (cdr (assoc 1 (entget ent)))))))
                  (t
                   (setq res (getstring t "\nהזן טקסט ליידר: "))
-                  (if (and res (not (= res "")))
+                  (if (and res (not (equal res "")))
                     (setq *cdt-dlg-vals*
                       (cdt:set! *cdt-dlg-vals* "leader-text" res))))))
 
-              ; 7 — pick dimension → reads layer + dimstyle
-              ((= status 7)
+              ((equal status 7)
                (princ "\nהצבע על מידה קיימת: ")
                (setq ent (car (entsel)))
                (if ent
@@ -611,13 +605,11 @@
                        (cdt:set! *cdt-dlg-vals* "dim-style"
                          (cdr (assoc 3 ed))))))))
 
-              ; 8 — pick title layer
-              ((= status 8)
+              ((equal status 8)
                (setq res (cdt:pick-layer "הצבע על אובייקט שכבת כותרת"))
                (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "title-layer" res))))
 
-              ; 9 — pick title row-1 style + height from text entity
-              ((= status 9)
+              ((equal status 9)
                (princ "\nהצבע על טקסט לגודל שורה 1: ")
                (setq ent (car (entsel)))
                (if ent
@@ -631,8 +623,7 @@
                        (cdt:set! *cdt-dlg-vals* "title-height1"
                          (rtos (cdr (assoc 40 ed)) 2 4)))))))
 
-              ; 10 — pick title row-2 style + height from text entity
-              ((= status 10)
+              ((equal status 10)
                (princ "\nהצבע על טקסט לגודל שורה 2: ")
                (setq ent (car (entsel)))
                (if ent
@@ -646,8 +637,7 @@
                        (cdt:set! *cdt-dlg-vals* "title-height2"
                          (rtos (cdr (assoc 40 ed)) 2 4)))))))
 
-              ; 11 — pick separator line weight from line entity
-              ((= status 11)
+              ((equal status 11)
                (princ "\nהצבע על קו לקריאת עובי: ")
                (setq ent (car (entsel)))
                (if (and ent (assoc 370 (entget ent)))
@@ -655,8 +645,7 @@
                    (cdt:set! *cdt-dlg-vals* "title-lweight"
                      (itoa (cdr (assoc 370 (entget ent))))))))
 
-              ; 12 — pick stirrup layer
-              ((= status 12)
+              ((equal status 12)
                (setq res (cdt:pick-layer "הצבע על אובייקט שכבת האוגן"))
                (if res (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "stirrup-layer" res))))))))
 
