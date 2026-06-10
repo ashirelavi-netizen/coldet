@@ -502,7 +502,8 @@
 
   ; Try to load DCL from support path, then from LSP directory
   (setq dlg-id (load_dialog "COLDET"))
-  (if (< dlg-id 0)
+  (princ (strcat "\n[D] load_dialog=" (if (numberp dlg-id) (itoa dlg-id) (vl-princ-to-string dlg-id))))
+  (if (or (null dlg-id) (and (numberp dlg-id) (< dlg-id 0)))
     (progn
       (setq ldir (cdt:lsp-dir))
       (if ldir
