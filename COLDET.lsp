@@ -21,6 +21,7 @@
 
 (defun cdt:defaults ()
   (list
+    (cons "version"       "1.1")
     (cons "ext-layer"     "0")
     (cons "int-layer"     "0")
     (cons "int-offset"    "3.0")
@@ -55,7 +56,10 @@
                       (list (cons (substr line 1 pos)
                                   (substr line (+ pos 2))))))))
       (close f)
-      cfg)
+      ; קובץ ישן (ללא שדה version תואם) — מטפלים כהפעלה ראשונה
+      (if (equal (cdt:get cfg "version") "1.1")
+        cfg
+        nil))
     nil))
 
 (defun cdt:get (cfg key)
