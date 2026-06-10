@@ -1,11 +1,10 @@
-// COLDET.dcl — Settings Dialog
+/* COLDET.dcl - Settings Dialog */
 
 coldet_settings : dialog {
-  label = "COLDET — Settings";
+  label = "COLDET - Settings";
 
   : row {
 
-    // ── עמודה שמאל ──────────────────────────────────────
     : column {
 
       : boxed_column {
@@ -61,7 +60,6 @@ coldet_settings : dialog {
 
     }
 
-    // ── עמודה ימין ──────────────────────────────────────
     : column {
 
       : boxed_column {
@@ -124,7 +122,7 @@ coldet_settings : dialog {
       }
 
       : boxed_column {
-        label = "6. Stirrup (symbolic shape)";
+        label = "6. Stirrup";
         : row {
           : edit_box {
             key = "stirrup_layer"; label = "Layer:";
