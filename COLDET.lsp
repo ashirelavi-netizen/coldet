@@ -16,8 +16,11 @@
 ;;; A. הגדרות — שמירה וטעינה
 ;;; ============================================================
 
-(defun cdt:settings-path ()
-  (strcat (getenv "USERPROFILE") "\\coldet_settings.dat"))
+(defun cdt:settings-path (/ ldir)
+  (setq ldir (cdt:lsp-dir))
+  (if ldir
+    (strcat ldir "\\coldet_settings.dat")
+    (strcat (getenv "USERPROFILE") "\\coldet_settings.dat")))
 
 (defun cdt:defaults ()
   (list
