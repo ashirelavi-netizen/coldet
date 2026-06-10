@@ -56,10 +56,7 @@
                       (list (cons (substr line 1 pos)
                                   (substr line (+ pos 2))))))))
       (close f)
-      ; קובץ ישן (ללא שדה version תואם) — מטפלים כהפעלה ראשונה
-      (if (equal (cdt:get cfg "version") "1.1")
-        cfg
-        nil))
+      cfg)
     nil))
 
 (defun cdt:get (cfg key)
@@ -653,8 +650,25 @@
 
   (if (= status 1) *cdt-dlg-vals* cfg-in))
 
-(defun cdt:first-run ()
-  (cdt:settings-dialog (or (cdt:load) (cdt:defaults))))
+(defun cdt:merge-cfg (saved defaults / result key)
+  ; מחזיר את saved, ומוסיף כל שדה חסר מ-defaults
+  (setq result saved)
+  (foreach pair defaults
+    (setq key (car pair))
+    (if (null (cdt:get result key))
+      (setq result (cdt:set! result key (cdr pair)))))
+  result)
+
+(defun cdt:first-run (/ saved merged)
+  (setq saved (cdt:load))
+  (if saved
+    ; קובץ ישן קיים — ממזג עם ברירות מחדל חדשות ושומר בשקט
+    (progn
+      (setq merged (cdt:merge-cfg saved (cdt:defaults)))
+      (cdt:save merged)
+      merged)
+    ; אין קובץ כלל — פותח חלון הגדרות
+    (cdt:settings-dialog (cdt:defaults))))
 
 ;;; ============================================================
 ;;; M. הפקודה הראשית — C:COLDET
