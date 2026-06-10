@@ -6,15 +6,16 @@
 (vl-load-com)
 
 ;;; ─── נתיב התוסף (נקבע בזמן טעינה) ──────────────────────────
+; ZWCAD עלול להחזיר T מ-findfile במקום נתיב — לכן בודקים stringp
 (setq *cdt-lsp-dir*
   (cond
-    ; אם תיקיית coldet בנתיבי החיפוש של ZWCAD
-    ((findfile "COLDET.lsp")
-     (vl-filename-directory (findfile "COLDET.lsp")))
-    ; גיבוי: בניית הנתיב לפי USERPROFILE
-    ((findfile (strcat (getenv "USERPROFILE")
-                       "\\Desktop\\claude\\Acad\\coldet\\COLDET.lsp"))
+    ; נתיב ידוע לפי USERPROFILE (הכי אמין)
+    ((vl-file-directory-p
+       (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\coldet"))
      (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\coldet"))
+    ; גיבוי: findfile — רק אם מחזיר מחרוזת
+    ((stringp (findfile "COLDET.lsp"))
+     (vl-filename-directory (findfile "COLDET.lsp")))
     (t nil)))
 
 ;;; ─── קבועים ─────────────────────────────────────────────────
@@ -30,7 +31,7 @@
 
 (defun cdt:settings-path (/ ldir)
   (setq ldir (cdt:lsp-dir))
-  (if ldir
+  (if (stringp ldir)
     (strcat ldir "\\coldet_settings.dat")
     (strcat (getenv "USERPROFILE") "\\coldet_settings.dat")))
 
