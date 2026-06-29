@@ -58,6 +58,7 @@
 (setq CDT:HOOK-LEN    10.0)   ; אורך וו אוגן
 (setq CDT:HOOK-EXT     3.0)   ; הרחבה ויזואלית של וו (הפרדה)
 (setq CDT:DIM-OFFSET  10.0)   ; מרחק קו מידה מהגיאומטריה החיצונית
+(setq CDT:BAR-DIM-GAP 15.0)   ; מרווח אנכי של בלוק המוטות מתחת לקו מידת הרוחב
 
 ;;; ─── טעינת BARS אוטומטית ────────────────────────────────────
 (setq *cdt-bars-ok* nil)
@@ -1263,12 +1264,12 @@
                    ls-arm1 ls-arm2
                    ls-a1-inset ls-a1-cen ls-a1-pb ls-a1-pt
                    ls-a2-inset ls-a2-cen ls-a2-pl ls-a2-pr
-                   placed bar-conn-pt bar-extremes
+                   placed bar-conn-pt
                    bar-d1 bar-d2
                    prev-dimscale dim-off dim-prev-lay
                    prev-osmode
                    ent-before blk-ss blk-e blk-name blk-base ins-pt
-                   dlg-start ldir start-code cfg-saved)
+                   dlg-start ldir start-code cfg-saved shape-kw)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -1309,6 +1310,23 @@
     (t
      (if (null cfg-saved)
        (setq cfg (cdt:settings-dialog cfg)))
+
+     ;; בחירת סוג צורה ידנית — לפני בחירת הפוליגון
+     (initget "REC L T Z U CIR")
+     (setq shape-kw (getkword "\nShape type [REC/L/T/Z/U/CIR] <REC>: "))
+     (if (null shape-kw) (setq shape-kw "REC"))   ; Enter = ריבוע
+     (setq shape (cond ((= shape-kw "REC") "rect")
+                       ((= shape-kw "L")   "lshape")
+                       ((= shape-kw "T")   "tshape")
+                       ((= shape-kw "Z")   "zshape")
+                       ((= shape-kw "U")   "chet")
+                       ((= shape-kw "CIR") "circle")))
+     (cdt:log (strcat "[L01] shape=" shape " (kw=" shape-kw ")"))
+
+     ;; צורות שעדיין לא מומשו — הודעה מסודרת ויציאה נקייה
+     (if (member shape '("tshape" "zshape" "chet"))
+       (progn (princ (strcat "\n[" shape-kw " - not yet implemented]")) (exit)))
+
      (setq sel (entsel "\nSelect column outline: "))
      (if (null sel)
        (princ "\nCancelled.")
@@ -1317,12 +1335,6 @@
 
          ;; קריאת XData
          (setq col-num (cdt:read-colnum ename))
-
-         ;; זיהוי צורה
-         (setq shape (cdt:detect-shape ename))
-         (cdt:log (strcat "[L01] shape=" (if shape shape "nil")))
-         (if (null shape)
-           (progn (princ "\nUnknown shape - select column outline polyline.") (exit)))
 
          ;; נתוני הגדרות נפוצים
          (setq offset      (atof (cdt:get cfg "int-offset"))
@@ -1418,14 +1430,16 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-txt-color")))
 
-             ;; נקודת חיבור לבלוק מוטות — פינה ימין-תחתית, מחוץ לגיאומטריה החיצונית
-             ;; (+18.0 כדי לקזז את חצי-רוחב קו הטקסט, כך שקצה הקו עצמו יוצא מ-bb-ext)
+             ;; נקודת חיבור לבלוק מוטות — תחתית-ממורכז, מתחת לקו מידת הרוחב
+             ;; (אותו צד כמו המידות; החישוקים מימין → אין התנגשות לפי בנייה)
+             ;; זוג הדונאטים התחתונים (שמאל+ימין) → לידרים יורדים סימטרית למרכז
              (cdt:log "[L11] bar-conn-pt")
-             (setq bar-conn-pt (list (+ (caddr bb-ext) CDT:LEAD-DIST 18.0) (cadr bb-ext))
-                   bar-extremes (cdt:closest-and-farthest-donut placed
-                                  (list (caddr bb-int) (cadr bb-int)))
-                   bar-d1 (car  bar-extremes)
-                   bar-d2 (cadr bar-extremes))
+             (setq bar-conn-pt (list (* 0.5 (+ (car bb-ext) (caddr bb-ext)))
+                                     (- (cadr bb-ext) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+                   bar-d1 (car (cdt:closest-and-farthest-donut placed
+                                 (list (car  bb-int) (cadr bb-int))))
+                   bar-d2 (car (cdt:closest-and-farthest-donut placed
+                                 (list (caddr bb-int) (cadr bb-int)))))
 
              ;; Y עליון ומרכז X לכותרת
              (setq top-y (cadddr bb-ext)
@@ -1639,13 +1653,15 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-txt-color")))
 
-             ;; placed ו-conn-pt לבלוק מוטות — פינה ימין-תחתית, מחוץ לגיאומטריה החיצונית
+             ;; placed ו-conn-pt לבלוק מוטות — תחתית-ממורכז, מתחת לקו מידת הרוחב
+             ;; זוג הדונאטים התחתונים (שמאל+ימין) → לידרים יורדים סימטרית למרכז
              (setq placed        ls-placed
-                   bar-conn-pt   (list (+ (caddr ls-overall) CDT:LEAD-DIST 18.0) (cadr ls-overall))
-                   bar-extremes  (cdt:closest-and-farthest-donut ls-placed
-                                   (list (caddr ls-overall) (cadr ls-overall)))
-                   bar-d1        (car  bar-extremes)
-                   bar-d2        (cadr bar-extremes))
+                   bar-conn-pt   (list (* 0.5 (+ (car ls-overall) (caddr ls-overall)))
+                                       (- (cadr ls-overall) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+                   bar-d1        (car (cdt:closest-and-farthest-donut ls-placed
+                                        (list (car  ls-overall) (cadr ls-overall))))
+                   bar-d2        (car (cdt:closest-and-farthest-donut ls-placed
+                                        (list (caddr ls-overall) (cadr ls-overall)))))
 
              ;; top-y ו-cx לכותרת
              (setq top-y (cadddr ls-overall)
