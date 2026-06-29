@@ -314,6 +314,13 @@
 (defun cdt:bbox-width  (bb) (- (caddr bb)  (car bb)))
 (defun cdt:bbox-height (bb) (- (cadddr bb) (cadr bb)))
 
+(defun cdt:bbox-intersect (a b)
+  ; חיתוך שני מלבנים — מחזיר את מלבן החפיפה (minX minY maxX maxY)
+  (list (max (car a)   (car b))
+        (max (cadr a)  (cadr b))
+        (min (caddr a) (caddr b))
+        (min (cadddr a)(cadddr b))))
+
 ;;; ============================================================
 ;;; G. פונקציות ציור בסיסיות
 ;;; ============================================================
@@ -614,6 +621,59 @@
                  legA (list (min beamfar tipa) y0 (max beamfar tipa) lo)
                  legB (list (min beamfar tipb) hi (max beamfar tipb) y1)))))
       (if beam (list bb (list beam legA legB)) nil))))
+
+(defun cdt:chet-leg-donuts (leg ov beam-cen size layer placed /
+                            tol lx0 ly0 lx1 ly1 ox0 oy0 ox1 oy1
+                            l-inset l-cen ov-inset ov-cen vert
+                            freeY ceilY farY innerX outerX
+                            freeX ceilX farX innerY outerY
+                            p-fo p-fi p-oc p-reflex p-ofar p-iffar)
+  ; דונאטים של רגל אחת: 2 פינות קצה חופשי + מילוי 3 הצלעות החיצוניות שלה.
+  ; מחזיר (placed p-ofar p-reflex p-iffar) — עוגנים לחיבור הקורה אחר כך.
+  (setq tol     CDT:TOL
+        lx0 (car leg) ly0 (cadr leg) lx1 (caddr leg) ly1 (cadddr leg)
+        ox0 (car ov)  oy0 (cadr ov)  ox1 (caddr ov)  oy1 (cadddr ov)
+        l-inset  (cdt:donut-inset size leg)  l-cen  (cdt:bbox-center leg)
+        ov-inset (cdt:donut-inset size ov)   ov-cen (cdt:bbox-center ov)
+        vert (or (> (- oy0 ly0) tol) (> (- ly1 oy1) tol)))
+  (if vert
+    (progn
+      (if (> (- oy0 ly0) tol)
+        (setq freeY ly0 ceilY oy0 farY ly1)     ; רגל יורדת מטה
+        (setq freeY ly1 ceilY oy1 farY ly0))    ; רגל עולה מעלה
+      (if (> (car beam-cen) (car l-cen))
+        (setq innerX lx1 outerX lx0)            ; פנים (לכיוון התקרה) מימין
+        (setq innerX lx0 outerX lx1))
+      (setq p-fo     (cdt:corner-toward-center (list outerX freeY) l-cen  l-inset)
+            p-fi     (cdt:corner-toward-center (list innerX freeY) l-cen  l-inset)
+            p-oc     (cdt:corner-toward-center (list outerX ceilY) ov-cen ov-inset)
+            p-reflex (cdt:corner-toward-center (list innerX ceilY) ov-cen ov-inset)
+            p-ofar   (cdt:corner-toward-center (list outerX farY)  ov-cen ov-inset)
+            p-iffar  (cdt:corner-toward-center (list innerX farY)  ov-cen ov-inset)))
+    (progn
+      (if (> (- ox0 lx0) tol)
+        (setq freeX lx0 ceilX ox0 farX lx1)     ; רגל יוצאת שמאלה
+        (setq freeX lx1 ceilX ox1 farX lx0))    ; רגל יוצאת ימינה
+      (if (> (cadr beam-cen) (cadr l-cen))
+        (setq innerY ly1 outerY ly0)            ; פנים (לכיוון התקרה) למעלה
+        (setq innerY ly0 outerY ly1))
+      (setq p-fo     (cdt:corner-toward-center (list freeX outerY) l-cen  l-inset)
+            p-fi     (cdt:corner-toward-center (list freeX innerY) l-cen  l-inset)
+            p-oc     (cdt:corner-toward-center (list ceilX outerY) ov-cen ov-inset)
+            p-reflex (cdt:corner-toward-center (list ceilX innerY) ov-cen ov-inset)
+            p-ofar   (cdt:corner-toward-center (list farX  outerY) ov-cen ov-inset)
+            p-iffar  (cdt:corner-toward-center (list farX  innerY) ov-cen ov-inset))))
+  ;; פינות הקצה החופשי
+  (setq placed (cdt:donut-if-new p-fo size layer placed)
+        placed (cdt:donut-if-new p-fi size layer placed))
+  ;; צלע חיצונית מלאה: קצה חופשי -> גובה התקרה -> הקצה הרחוק (צד הקורה)
+  (setq placed (cdt:fill-pts p-fo p-oc   size layer placed)
+        placed (cdt:fill-pts p-oc p-ofar size layer placed))
+  ;; צלע פנימית — רק עד התקרה (מעבר לזה זה פנים החומר)
+  (setq placed (cdt:fill-pts p-fi p-reflex size layer placed))
+  ;; צלע הקצה החופשי
+  (setq placed (cdt:fill-pts p-fo p-fi size layer placed))
+  (list placed p-ofar p-reflex p-iffar))
 
 ;;; ============================================================
 ;;; J. צורה סמלית — אוגן
@@ -1360,7 +1420,9 @@
                    prev-osmode
                    ent-before blk-ss blk-e blk-name blk-base ins-pt
                    dlg-start ldir start-code cfg-saved shape-kw
-                   ch-dec ch-bb ch-rects rc)
+                   ch-dec ch-bb ch-rects rc
+                   ch-beam ch-lA ch-lB ch-bcen ch-ov1 ch-ov2
+                   ch-r1 ch-r2 ch-aof ch-arx ch-aif ch-bof ch-brx ch-bif)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -1779,10 +1841,43 @@
              (foreach rc ch-rects
                (cdt:draw-closed-rect (cdt:bbox-inset rc offset) (cdt:get cfg "int-layer")))
              (setvar "CECOLOR" "256")
-             ;; בשלב זה: בלי דונאטים/חישוקים/מידות. רק כותרת ואיסוף לבלוק.
-             (setq placed nil
-                   top-y  (cadddr ch-bb)
-                   cx     (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
+
+             ;; ── דונאטים ── מלבנים פנימיים מוקטנים
+             (cdt:log "[L41] chet-donuts")
+             (setq ch-beam (cdt:bbox-inset (nth 0 ch-rects) offset)
+                   ch-lA   (cdt:bbox-inset (nth 1 ch-rects) offset)
+                   ch-lB   (cdt:bbox-inset (nth 2 ch-rects) offset)
+                   ch-bcen (cdt:bbox-center ch-beam)
+                   ch-ov1  (cdt:bbox-intersect ch-beam ch-lA)
+                   ch-ov2  (cdt:bbox-intersect ch-beam ch-lB)
+                   placed  nil)
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
+             ;; 1) 8 פינות שני ריבועי החפיפה
+             (setq placed (cdt:place-corner-donuts-tracked ch-ov1 donut-size donut-layer placed)
+                   placed (cdt:place-corner-donuts-tracked ch-ov2 donut-size donut-layer placed))
+             ;; 2+3) פינות קצה + מילוי צלעות לכל רגל; אוסף עוגנים לחיבור הקורה
+             (setq ch-r1 (cdt:chet-leg-donuts ch-lA ch-ov1 ch-bcen donut-size donut-layer placed)
+                   placed  (nth 0 ch-r1) ch-aof (nth 1 ch-r1) ch-arx (nth 2 ch-r1) ch-aif (nth 3 ch-r1))
+             (setq ch-r2 (cdt:chet-leg-donuts ch-lB ch-ov2 ch-bcen donut-size donut-layer placed)
+                   placed  (nth 0 ch-r2) ch-bof (nth 1 ch-r2) ch-brx (nth 2 ch-r2) ch-bif (nth 3 ch-r2))
+             ;; הצלע החיצונית הרחוקה של הקורה (קצה רחוק -> פנים -> פנים -> קצה רחוק)
+             (setq placed (cdt:fill-pts ch-aof ch-aif donut-size donut-layer placed)
+                   placed (cdt:fill-pts ch-aif ch-bif donut-size donut-layer placed)
+                   placed (cdt:fill-pts ch-bif ch-bof donut-size donut-layer placed))
+             ;; תקרת המגרעת (בין שתי פינות הקעורות)
+             (setq placed (cdt:fill-pts ch-arx ch-brx donut-size donut-layer placed))
+             (setvar "CECOLOR" "256")
+             (cdt:log (strcat "[L42] chet-donuts-done placed=" (itoa (length placed))))
+
+             ;; חיבור לבלוק מוטות — תחתית-ממורכז (זוג הדונאטים הקיצוניים התחתונים)
+             (setq bar-conn-pt (list (* 0.5 (+ (car ch-bb) (caddr ch-bb)))
+                                     (- (cadr ch-bb) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+                   bar-d1      (car (cdt:closest-and-farthest-donut placed
+                                      (list (car  ch-bb) (cadr ch-bb))))
+                   bar-d2      (car (cdt:closest-and-farthest-donut placed
+                                      (list (caddr ch-bb) (cadr ch-bb))))
+                   top-y       (cadddr ch-bb)
+                   cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
 
          ;; ─── בלוק מוטות ──────────────────────────────────────────
          (cdt:log "[L30] before bar-popup")
