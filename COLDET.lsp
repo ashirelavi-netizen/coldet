@@ -59,6 +59,7 @@
 (setq CDT:HOOK-EXT     3.0)   ; הרחבה ויזואלית של וו (הפרדה)
 (setq CDT:DIM-OFFSET  10.0)   ; מרחק קו מידה מהגיאומטריה החיצונית
 (setq CDT:BAR-DIM-GAP 15.0)   ; מרווח אנכי של בלוק המוטות מתחת לקו מידת הרוחב
+(setq CDT:TOL          1.0)   ; טולרנס (ס"מ) לכל ההשוואות הגיאומטריות במנוע הצורות
 
 ;;; ─── טעינת BARS אוטומטית ────────────────────────────────────
 (setq *cdt-bars-ok* nil)
@@ -524,6 +525,95 @@
   (setq a1 (* (cdt:bbox-width r1) (cdt:bbox-height r1))
         a2 (* (cdt:bbox-width r2) (cdt:bbox-height r2)))
   (if (>= a1 a2) (list r1 r2) (list r2 r1)))
+
+;;; ============================================================
+;;; F2. מנוע צורות — פינות קעורות ומפענחי צורה
+;;; ============================================================
+
+(defun cdt:reflex-vertices (verts / vs n area i p0 p1 p2 e1x e1y e2x e2y cr ccw res)
+  ; פינות קעורות אמיתיות — לפי כיוון הפנייה של המתאר בכל פינה (מבחן קעור/קמור),
+  ; ולא לפי "בתוך התיבה" (שנשבר ברגליים לא-שוות).
+  (setq vs verts)
+  ; הסרת קודקוד-סגירה כפול (אם הנקודה האחרונה = הראשונה)
+  (if (and (> (length vs) 1)
+           (< (distance (list (car (car vs))  (cadr (car vs)))
+                        (list (car (last vs)) (cadr (last vs)))) CDT:TOL))
+    (setq vs (reverse (cdr (reverse vs)))))
+  (setq n (length vs))
+  (if (< n 3)
+    nil
+    (progn
+      ; שטח חתום — לקביעת כיוון הסיבוב (CCW אם חיובי)
+      (setq area 0.0  i 0)
+      (while (< i n)
+        (setq p1   (nth i vs)
+              p2   (nth (rem (1+ i) n) vs)
+              area (+ area (- (* (car p1) (cadr p2)) (* (car p2) (cadr p1))))
+              i    (1+ i)))
+      (setq ccw (> area 0.0)  res nil  i 0)
+      (while (< i n)
+        (setq p0  (nth (rem (+ i (1- n)) n) vs)   ; קודקוד קודם
+              p1  (nth i vs)
+              p2  (nth (rem (1+ i) n) vs)         ; קודקוד הבא
+              e1x (- (car p1) (car p0))  e1y (- (cadr p1) (cadr p0))
+              e2x (- (car p2) (car p1))  e2y (- (cadr p2) (cadr p1))
+              cr  (- (* e1x e2y) (* e1y e2x)))
+        ; קעור אם כיוון הפנייה הפוך לכיוון הכללי של המתאר
+        (if (if ccw (< cr 0.0) (> cr 0.0))
+          (setq res (append res (list p1))))
+        (setq i (1+ i)))
+      res)))
+
+(defun cdt:perp-coord (verts val isX ref tol / best bd pc d)
+  ; על הקו שבו אחד הצירים = val, מחזיר את הקואורדינטה הניצבת של הקודקוד
+  ; הרחוק ביותר מ-ref (כלומר קצה הרגל, ולא הפינה הקעורה עצמה שיושבת על ref)
+  (setq best nil  bd -1.0)
+  (foreach v verts
+    (if (< (abs (- (if isX (car v) (cadr v)) val)) tol)
+      (progn
+        (setq pc (if isX (cadr v) (car v))  d (abs (- pc ref)))
+        (if (> d bd) (setq bd d  best pc)))))
+  best)
+
+(defun cdt:chet-decompose (verts offset / bb tol reflex r1 r2
+                            x0 y0 x1 y1 cn lo hi tipa tipb beamfar
+                            beam legA legB)
+  ; מפענח צורת ח: מחזיר (overall-bbox (beam legA legB)) או nil אם לא תקין.
+  ; מטפל ב-4 הכיוונים וברגליים לא-שוות. המלבנים הם החיצוניים (לא מוקטנים).
+  (setq bb     (cdt:bbox-from-verts verts)
+        tol    CDT:TOL
+        reflex (cdt:reflex-vertices verts)
+        x0 (car bb)  y0 (cadr bb)  x1 (caddr bb)  y1 (cadddr bb))
+  (if (/= (length reflex) 2)
+    nil                                    ; חייב בדיוק 2 פינות קעורות
+    (progn
+      (setq r1 (car reflex)  r2 (cadr reflex)  beam nil)
+      (cond
+        ;; תקרה אופקית — הפינות חולקות Y → פתח למעלה/למטה, רגליים אנכיות
+        ((< (abs (- (cadr r1) (cadr r2))) tol)
+         (setq cn   (cadr r1)
+               lo   (min (car r1) (car r2))
+               hi   (max (car r1) (car r2))
+               tipa (cdt:perp-coord verts lo T cn tol)
+               tipb (cdt:perp-coord verts hi T cn tol))
+         (if (and tipa tipb)
+           (setq beamfar (if (< tipa cn) y1 y0)
+                 beam (list x0 (min cn beamfar) x1 (max cn beamfar))
+                 legA (list x0 (min beamfar tipa) lo (max beamfar tipa))
+                 legB (list hi (min beamfar tipb) x1 (max beamfar tipb)))))
+        ;; תקרה אנכית — הפינות חולקות X → פתח שמאלה/ימינה, רגליים אופקיות
+        ((< (abs (- (car r1) (car r2))) tol)
+         (setq cn   (car r1)
+               lo   (min (cadr r1) (cadr r2))
+               hi   (max (cadr r1) (cadr r2))
+               tipa (cdt:perp-coord verts lo nil cn tol)
+               tipb (cdt:perp-coord verts hi nil cn tol))
+         (if (and tipa tipb)
+           (setq beamfar (if (< tipa cn) x1 x0)
+                 beam (list (min cn beamfar) y0 (max cn beamfar) y1)
+                 legA (list (min beamfar tipa) y0 (max beamfar tipa) lo)
+                 legB (list (min beamfar tipb) hi (max beamfar tipb) y1)))))
+      (if beam (list bb (list beam legA legB)) nil))))
 
 ;;; ============================================================
 ;;; J. צורה סמלית — אוגן
@@ -1269,7 +1359,8 @@
                    prev-dimscale dim-off dim-prev-lay
                    prev-osmode
                    ent-before blk-ss blk-e blk-name blk-base ins-pt
-                   dlg-start ldir start-code cfg-saved shape-kw)
+                   dlg-start ldir start-code cfg-saved shape-kw
+                   ch-dec ch-bb ch-rects rc)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -1324,7 +1415,7 @@
      (cdt:log (strcat "[L01] shape=" shape " (kw=" shape-kw ")"))
 
      ;; צורות שעדיין לא מומשו — הודעה מסודרת ויציאה נקייה
-     (if (member shape '("tshape" "zshape" "chet"))
+     (if (member shape '("tshape" "zshape"))
        (progn (princ (strcat "\n[" shape-kw " - not yet implemented]")) (exit)))
 
      (setq sel (entsel "\nSelect column outline: "))
@@ -1667,6 +1758,32 @@
              (setq top-y (cadddr ls-overall)
                    cx    (* 0.5 (+ (car ls-overall) (caddr ls-overall))))))
 
+         ;; ─── מסלול צורת ח (U) — שלב ביניים: חיצוני + מלבנים פנימיים בלבד ───
+         (if (= shape "chet")
+           (progn
+             (cdt:log "[L40] chet-path")
+             (setq verts  (cdt:get-poly-verts ename)
+                   ch-dec (cdt:chet-decompose verts offset))
+             (if (null ch-dec)
+               (progn (setvar "OSMODE" prev-osmode)
+                      (princ "\nError: selected shape is not a valid U (chet).") (exit)))
+             (setq ch-bb    (car  ch-dec)
+                   ch-rects (cadr ch-dec))
+             ;; גיאומטריה חיצונית — העתק הפוליגון
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
+             (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
+             (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
+             (setvar "CECOLOR" "256")
+             ;; גיאומטריות פנימיות — כל מלבן מוקטן באופסט
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
+             (foreach rc ch-rects
+               (cdt:draw-closed-rect (cdt:bbox-inset rc offset) (cdt:get cfg "int-layer")))
+             (setvar "CECOLOR" "256")
+             ;; בשלב זה: בלי דונאטים/חישוקים/מידות. רק כותרת ואיסוף לבלוק.
+             (setq placed nil
+                   top-y  (cadddr ch-bb)
+                   cx     (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
+
          ;; ─── בלוק מוטות ──────────────────────────────────────────
          (cdt:log "[L30] before bar-popup")
          (if placed
@@ -1735,6 +1852,7 @@
                (cond
                  (bb-ext      (list (car bb-ext)      (cadr bb-ext)))
                  (ls-overall  (list (car ls-overall)  (cadr ls-overall)))
+                 (ch-bb       (list (car ch-bb)       (cadr ch-bb)))
                  (t           '(0.0 0.0))))
 
              ;; יצירת הגדרת בלוק — מסיר אובייקטים ומגדיר בלוק
