@@ -321,6 +321,21 @@
         (min (caddr a) (caddr b))
         (min (cadddr a)(cadddr b))))
 
+(defun cdt:ents-bbox-max (after / e obj ll ur lst maxx maxy)
+  ; מחזיר (maxX maxY) של כל הישויות שנוצרו אחרי הישות 'after' (כולל טקסט מידות).
+  ; משמש למקם כותרת/חישוקים ביחס לגבול האמיתי של מה שכבר צויר.
+  (setq e (if after (entnext after) (entnext)))
+  (while e
+    (setq obj (vlax-ename->vla-object e))
+    (vl-catch-all-apply
+      '(lambda ()
+         (vla-getboundingbox obj 'll 'ur)
+         (setq lst (vlax-safearray->list ur))
+         (if (or (null maxx) (> (car  lst) maxx)) (setq maxx (car  lst)))
+         (if (or (null maxy) (> (cadr lst) maxy)) (setq maxy (cadr lst)))))
+    (setq e (entnext e)))
+  (list maxx maxy))
+
 ;;; ============================================================
 ;;; G. פונקציות ציור בסיסיות
 ;;; ============================================================
@@ -675,6 +690,73 @@
   (setq placed (cdt:fill-pts p-fo p-fi size layer placed))
   (list placed p-ofar p-reflex p-iffar))
 
+(defun cdt:chet-dimensions (rects bb dim-off / beam legA legB horiz
+                            legL legR openLow ceilC topC hpos fL fR xL xR
+                            legBot legTop openLeft nearC farEdge nearpos fB fT yB yT)
+  ; קווי מידה לצורת ח על 3 צדדים בלבד (הגב הסגור לא מקבל מידה):
+  ; הצד הפתוח — רוחב 2 הרגליים + המגרעת; וכל רגל בצידה — אורך מהקצה עד
+  ; הגוף + מידת השלמה. תומך בכל 4 סיבובי הצורה (פתח למעלה/למטה/שמאל/ימין).
+  (setq beam  (nth 0 rects)  legA (nth 1 rects)  legB (nth 2 rects)
+        horiz (> (cdt:bbox-width beam) (cdt:bbox-height beam)))
+  (if horiz
+    (progn
+      ;; רגליים אנכיות — פתח למעלה/למטה
+      (if (< (car legA) (car legB)) (setq legL legA legR legB) (setq legL legB legR legA))
+      (setq openLow (< (cadr legL) (cadr beam)))
+      (if openLow
+        (setq ceilC (cadr beam)   topC (cadddr beam) hpos (- (cadr bb)   dim-off))
+        (setq ceilC (cadddr beam) topC (cadr beam)   hpos (+ (cadddr bb) dim-off)))
+      (setq fL (if openLow (cadr legL) (cadddr legL))
+            fR (if openLow (cadr legR) (cadddr legR))
+            xL (- (car bb)   dim-off)
+            xR (+ (caddr bb) dim-off))
+      ;; צד פתוח — רוחב רגל-שמאל, מגרעת, רוחב רגל-ימין
+      (command "_.DIMLINEAR" (list (car legL) fL) (list (caddr legL) fL)
+        (list (* 0.5 (+ (car legL) (caddr legL))) hpos))
+      (command "_.DIMLINEAR" (list (caddr legL) fL) (list (car legR) fL)
+        (list (* 0.5 (+ (caddr legL) (car legR))) hpos))
+      (command "_.DIMLINEAR" (list (car legR) fR) (list (caddr legR) fR)
+        (list (* 0.5 (+ (car legR) (caddr legR))) hpos))
+      ;; רגל שמאל — אורך + השלמה
+      (command "_.DIMLINEAR" (list (car legL) fL) (list (car legL) ceilC)
+        (list xL (* 0.5 (+ fL ceilC))))
+      (command "_.DIMLINEAR" (list (car legL) ceilC) (list (car legL) topC)
+        (list xL (* 0.5 (+ ceilC topC))))
+      ;; רגל ימין — אורך + השלמה
+      (command "_.DIMLINEAR" (list (caddr legR) fR) (list (caddr legR) ceilC)
+        (list xR (* 0.5 (+ fR ceilC))))
+      (command "_.DIMLINEAR" (list (caddr legR) ceilC) (list (caddr legR) topC)
+        (list xR (* 0.5 (+ ceilC topC)))))
+    (progn
+      ;; רגליים אופקיות — פתח שמאלה/ימינה
+      (if (< (cadr legA) (cadr legB)) (setq legBot legA legTop legB) (setq legBot legB legTop legA))
+      (setq openLeft (< (car legBot) (car beam)))
+      (if openLeft
+        (setq nearC (car beam)   farEdge (caddr beam) nearpos (- (car bb)   dim-off))
+        (setq nearC (caddr beam) farEdge (car beam)   nearpos (+ (caddr bb) dim-off)))
+      (setq fB (if openLeft (car legBot) (caddr legBot))
+            fT (if openLeft (car legTop) (caddr legTop))
+            yB (- (cadr bb)   dim-off)
+            yT (+ (cadddr bb) dim-off))
+      ;; צד פתוח — גובה רגל-תחתונה, מגרעת, גובה רגל-עליונה
+      (command "_.DIMLINEAR" (list fB (cadr legBot)) (list fB (cadddr legBot))
+        (list nearpos (* 0.5 (+ (cadr legBot) (cadddr legBot)))))
+      (command "_.DIMLINEAR" (list fB (cadddr legBot)) (list fB (cadr legTop))
+        (list nearpos (* 0.5 (+ (cadddr legBot) (cadr legTop)))))
+      (command "_.DIMLINEAR" (list fT (cadr legTop)) (list fT (cadddr legTop))
+        (list nearpos (* 0.5 (+ (cadr legTop) (cadddr legTop)))))
+      ;; רגל תחתונה — אורך + השלמה
+      (command "_.DIMLINEAR" (list fB (cadr legBot)) (list nearC (cadr legBot))
+        (list (* 0.5 (+ fB nearC)) yB))
+      (command "_.DIMLINEAR" (list nearC (cadr legBot)) (list farEdge (cadr legBot))
+        (list (* 0.5 (+ nearC farEdge)) yB))
+      ;; רגל עליונה — אורך + השלמה
+      (command "_.DIMLINEAR" (list fT (cadddr legTop)) (list nearC (cadddr legTop))
+        (list (* 0.5 (+ fT nearC)) yT))
+      (command "_.DIMLINEAR" (list nearC (cadddr legTop)) (list farEdge (cadddr legTop))
+        (list (* 0.5 (+ nearC farEdge)) yT))))
+  (princ))
+
 ;;; ============================================================
 ;;; J. צורה סמלית — אוגן
 ;;; ============================================================
@@ -718,7 +800,10 @@
   (command "_.COLOR" (cdt:color-str txt-color))
   (setq txt-h (rtos (- y1 y0) 2 0))
   (cdt:log "[S6] text-center H")
-  (cdt:draw-text-center (list (- x0 2.0) (* 0.5 (+ y0 y1))) th sty txt-h stirrup-layer 90 nil)
+  ; מספר אורך הצלע האנכית: בחישוק גבוה — מימין (מירור לבלוק שמשמאל); אחרת — משמאל
+  (if (> (- y1 y0) (- x1 x0))
+    (cdt:draw-text-center (list (+ x1 2.0 th) (* 0.5 (+ y0 y1))) th sty txt-h stirrup-layer 90 nil)
+    (cdt:draw-text-center (list (- x0 2.0) (* 0.5 (+ y0 y1))) th sty txt-h stirrup-layer 90 nil))
   (setq txt-w (rtos (- x1 x0) 2 0))
   (cdt:log "[S7] text-center W")
   (cdt:draw-text-center (list (* 0.5 (+ x0 x1)) (- y0 1.0 th)) th sty txt-w stirrup-layer 0 nil)
@@ -757,12 +842,9 @@
         txt1        (cdt:str-or-empty (cdt:get cfg "title-txt1")))
 
   (setq gap    (* 0.25 h1)
-        y2     (+ top-y h1 (* 0.5 h2))
+        y2     (- (+ top-y h1 (* 0.5 h2)) 2.0)   ; הטקסט התחתון (קנ"מ) — 2 יחידות למטה, להתרחק מהקו המפריד
         yl     (+ top-y h1 h2 (* 2.0 gap))
-        y1     (+ yl gap (* 0.5 h1))
-        half-w (+ (* 5.0 h1) (* 0.5 h1))
-        x0     (- cx half-w)
-        x1     (+ cx half-w))
+        y1     (+ yl gap (* 0.5 h1)))
 
   ; שורה 1 — טקסט עברי (מהגדרות) + מספר עמוד, זה לצד זה
   (setq tb-heb (vl-catch-all-apply 'textbox
@@ -781,9 +863,8 @@
       (car (cadr tb-num))
       (* (strlen col-num) hn 0.6)))
   ; מיקום: מספר משמאל, עברית מימין (קריאה RTL)
-  ; מרווח = 3 תווים בסיס + תו נוסף לכל ספרה מעבר לראשונה (יותר מקום למספר רב-ספרתי)
-  (setq gap-btw (* (/ w-num (* 1.0 (max 1 (strlen col-num))))
-                   (+ 3.0 (- (max 1 (strlen col-num)) 1)))
+  ; מרווח קבוע ביחס לגובה המספר (לא גדל עם מספר הספרות — הרוחב כבר מטופל במרכוז)
+  (setq gap-btw (* 2.5 hn)
         cx-num  (- cx (* 0.5 (+ w-heb gap-btw)))
         cx-heb  (+ cx (* 0.5 (+ w-num gap-btw))))
   ; אם אין טקסט עברי — מספר במרכז
@@ -797,7 +878,13 @@
   (cdt:draw-text-center (list cx-num y1) hn style-num col-num layer 0 nil)
   (setvar "CECOLOR" "256")
 
-  ; קו מפריד
+  ; קו מפריד — באורך השורה העליונה (מספר + עברית) + 3 יחידות מכל צד, ממורכז
+  (setq half-w (+ (if (equal txt1 "")
+                    (* 0.5 w-num)
+                    (* 0.5 (+ w-heb gap-btw w-num)))
+                  3.0)
+        x0     (- cx half-w)
+        x1     (+ cx half-w))
   (setvar "CECOLOR" col-line)
   (setq sep-line (cdt:draw-line (list x0 yl) (list x1 yl) layer))
   (setvar "CECOLOR" "256")
@@ -1291,20 +1378,29 @@
     (if (or (null dd-far) (> dd dd-far)) (setq d-far p dd-far dd)))
   (list d-near d-far))
 
+(defun cdt:bar-block-conn-pt (bb-ext cfg / txt-h)
+  ; ברירת מחדל לבלוק מוטות: אלכסון ימין-מטה מהפינה הימנית-תחתונה של הגיאומטריה החיצונית.
+  ; מרחק אחיד מהפינה לקצה הטקסט בשני הצירים = 1.5×גובה הטקסט.
+  ; ההחזרה היא הקצה השמאלי של הקו; באנכי מתחשבים במבנה הבלוק (שוליים-קו 3 + מרווח 1 + גובה הטקסט),
+  ; כך שהמרחק מהפינה לקצה העליון של הטקסט שווה למרחק האופקי.
+  (setq txt-h (atof (cdt:get cfg "donut-txt-height"))
+        txt-h (if (> txt-h 0.0) txt-h 2.5))
+  (list (+ (caddr bb-ext) (* 1.5 txt-h))
+        (- (cadr bb-ext) (* 1.5 txt-h) 3.0 1.0 txt-h)))
+
 (defun cdt:draw-bar-block (d1 d2 conn-pt qty bar-char bar-diam bar-len donut-radius layer line-color txt-style txt-height txt-color /
-                              txt cx ext-bottom top-y txt-h gap line-y dx dy dist edge1 edge2 near-pt
-                              tb txt-w half-len use-style)
-  ; conn-pt = (cx, ext-bottom)
+                              txt lx ly text-x top-y txt-h gap line-y dx dy dist edge1 edge2 near-pt
+                              tb txt-w line-len use-style)
+  ; conn-pt = הקצה השמאלי של הקו (נקודת האלכסון מהפינה הימנית-תחתונה); הבלוק נמתח ימינה
   (setq txt (strcat (itoa qty) bar-char bar-diam
                     (if (and (stringp bar-len) (> (strlen bar-len) 0)
                              (not (equal bar-len "0")))
                       (strcat " L=" bar-len) ""))
-        cx         (car  conn-pt)
-        ext-bottom (cadr conn-pt)
+        lx         (car  conn-pt)
+        ly         (cadr conn-pt)
         txt-h      (if (and txt-height (> txt-height 0.0)) txt-height 2.5)
         gap        1.0
-        top-y      (- ext-bottom txt-h)
-        line-y     (- top-y txt-h gap))
+        line-y     ly)
   (setq use-style
     (cond
       ((and txt-style (not (equal txt-style "")) (tblsearch "STYLE" txt-style)) txt-style)
@@ -1317,8 +1413,10 @@
     (if (and tb (not (vl-catch-all-error-p tb)) (listp tb) (listp (cadr tb)))
       (car (cadr tb))
       (* (strlen txt) txt-h 0.6)))
-  (setq half-len (+ (* 0.5 txt-w) 2.5)
-        near-pt  (list (- cx half-len) line-y))
+  (setq line-len (+ txt-w 6.0)            ; אורך הקו לפי כלל הכותרת — רוחב הטקסט + 3 יחידות מכל צד
+        text-x   (+ lx (* 0.5 line-len))  ; טקסט ממורכז מעל הקו
+        top-y    (+ ly gap txt-h)         ; הטקסט מעל הקו
+        near-pt  (list lx line-y))        ; הלידרים מתחברים לקצה השמאלי
   (setq edge1
     (if d1
       (progn
@@ -1341,19 +1439,19 @@
       nil))
   (if *cdt-bars-ok* (bars:ensure-opher-style))
   (command "_.COLOR" (if (and line-color (not (equal line-color ""))) line-color "BYLAYER"))
-  (cdt:draw-line near-pt (list (+ cx half-len) line-y) layer)
+  (cdt:draw-line near-pt (list (+ lx line-len) line-y) layer)
   (entmake
     (list (cons 0  "TEXT")
           (cons 8  layer)
           (cons 62 (if (and txt-color (not (equal txt-color ""))) (cdt-sint txt-color) 256))
-          (cons 10 (list cx top-y 0.0))
+          (cons 10 (list text-x top-y 0.0))
           (cons 40 txt-h)
           (cons 1  txt)
           (cons 50 0.0)
           (cons 7  use-style)
           (cons 72 1)
           (cons 73 3)
-          (cons 11 (list cx top-y 0.0))))
+          (cons 11 (list text-x top-y 0.0))))
   (if edge1 (cdt:draw-line edge1 near-pt layer))
   (if edge2 (cdt:draw-line edge2 near-pt layer))
   (command "_.COLOR" "BYLAYER"))
@@ -1422,7 +1520,8 @@
                    dlg-start ldir start-code cfg-saved shape-kw
                    ch-dec ch-bb ch-rects rc
                    ch-beam ch-lA ch-lB ch-bcen ch-ov1 ch-ov2
-                   ch-r1 ch-r2 ch-aof ch-arx ch-aif ch-bof ch-brx ch-bif)
+                   ch-r1 ch-r2 ch-aof ch-arx ch-aif ch-bof ch-brx ch-bif
+                   ch-mark ch-ext ch-maxx ch-maxy ch-sgap ch-sdx ch-sbb srect)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -1587,8 +1686,7 @@
              ;; (אותו צד כמו המידות; החישוקים מימין → אין התנגשות לפי בנייה)
              ;; זוג הדונאטים התחתונים (שמאל+ימין) → לידרים יורדים סימטרית למרכז
              (cdt:log "[L11] bar-conn-pt")
-             (setq bar-conn-pt (list (* 0.5 (+ (car bb-ext) (caddr bb-ext)))
-                                     (- (cadr bb-ext) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+             (setq bar-conn-pt (cdt:bar-block-conn-pt bb-ext cfg)
                    bar-d1 (car (cdt:closest-and-farthest-donut placed
                                  (list (car  bb-int) (cadr bb-int))))
                    bar-d2 (car (cdt:closest-and-farthest-donut placed
@@ -1809,8 +1907,7 @@
              ;; placed ו-conn-pt לבלוק מוטות — תחתית-ממורכז, מתחת לקו מידת הרוחב
              ;; זוג הדונאטים התחתונים (שמאל+ימין) → לידרים יורדים סימטרית למרכז
              (setq placed        ls-placed
-                   bar-conn-pt   (list (* 0.5 (+ (car ls-overall) (caddr ls-overall)))
-                                       (- (cadr ls-overall) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+                   bar-conn-pt   (cdt:bar-block-conn-pt ls-overall cfg)
                    bar-d1        (car (cdt:closest-and-farthest-donut ls-placed
                                         (list (car  ls-overall) (cadr ls-overall))))
                    bar-d2        (car (cdt:closest-and-farthest-donut ls-placed
@@ -1830,12 +1927,32 @@
                (progn (setvar "OSMODE" prev-osmode)
                       (princ "\nError: selected shape is not a valid U (chet).") (exit)))
              (setq ch-bb    (car  ch-dec)
-                   ch-rects (cadr ch-dec))
+                   ch-rects (cadr ch-dec)
+                   ch-mark  (entlast))   ; סמן לפני ציור — למדידת גבול אמיתי אחר כך
              ;; גיאומטריה חיצונית — העתק הפוליגון
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
              (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
              (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
              (setvar "CECOLOR" "256")
+
+             ;; ── קווי מידה — 3 צדדים (לא הגב)
+             (cdt:log "[L40b] chet-dims")
+             (setq prev-dimscale (getvar "DIMSCALE")
+                   dim-prev-lay  (getvar "CLAYER"))
+             (cdt:ensure-layer (cdt:get cfg "dim-layer"))
+             (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (if (and (cdt:get cfg "dim-style")
+                      (not (equal (cdt:get cfg "dim-style") "")))
+               (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
+                 (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
+                 (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             (cdt:chet-dimensions ch-rects ch-bb CDT:DIM-OFFSET)
+             (setvar "CLAYER"   dim-prev-lay)
+             (setvar "CECOLOR"  "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
              ;; גיאומטריות פנימיות — כל מלבן מוקטן באופסט
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
              (foreach rc ch-rects
@@ -1869,14 +1986,39 @@
              (setvar "CECOLOR" "256")
              (cdt:log (strcat "[L42] chet-donuts-done placed=" (itoa (length placed))))
 
-             ;; חיבור לבלוק מוטות — תחתית-ממורכז (זוג הדונאטים הקיצוניים התחתונים)
-             (setq bar-conn-pt (list (* 0.5 (+ (car ch-bb) (caddr ch-bb)))
-                                     (- (cadr ch-bb) CDT:DIM-OFFSET CDT:BAR-DIM-GAP))
+             ;; ── גבול אמיתי של מה שצויר (גיאומטריה + מידות + דונאטים)
+             (setq ch-ext  (cdt:ents-bbox-max ch-mark)
+                   ch-maxx (car  ch-ext)
+                   ch-maxy (cadr ch-ext))
+             (if (null ch-maxx) (setq ch-maxx (caddr  ch-bb)))
+             (if (null ch-maxy) (setq ch-maxy (cadddr ch-bb)))
+
+             ;; ── חישוקים — 3 מלבנים בפריסת ח' (כמו בחתך), מימין ורחוק מהמידות
+             (cdt:log "[L43] chet-stirrups")
+             (setq ch-sgap 30.0
+                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             (foreach srect (list ch-beam ch-lA ch-lB)
+               (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
+                                  (+ (caddr srect) ch-sdx) (cadddr srect)))
+               (cdt:draw-stirrup-rect ch-sbb (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-color")
+                 (cdt:get cfg "stirrup-txt-color"))
+               (if *cdt-bars-ok*
+                 (cdt:label-stirrup-safe ch-sbb (cdt:get cfg "stirrup-layer")
+                   (cdt:get cfg "stirrup-style")
+                   (atof (cdt:get cfg "stirrup-height"))
+                   (cdt:get cfg "stirrup-txt-color"))))
+             (cdt:log "[L44] after chet-stirrups")
+
+             ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה (זוג הדונאטים הקיצוניים התחתונים)
+             (setq bar-conn-pt (cdt:bar-block-conn-pt ch-bb cfg)
                    bar-d1      (car (cdt:closest-and-farthest-donut placed
                                       (list (car  ch-bb) (cadr ch-bb))))
                    bar-d2      (car (cdt:closest-and-farthest-donut placed
                                       (list (caddr ch-bb) (cadr ch-bb))))
-                   top-y       (cadddr ch-bb)
+                   top-y       (+ ch-maxy 10.0)    ; כותרת מעל הגבול האמיתי (כולל המידות)
                    cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
 
          ;; ─── בלוק מוטות ──────────────────────────────────────────
