@@ -757,6 +757,125 @@
         (list (* 0.5 (+ nearC farEdge)) yT))))
   (princ))
 
+(defun cdt:zshape-decompose (verts / bb tol reflex r1 r2 x0 y0 x1 y1
+                              dx dy wx0 wx1 wy0 wy1
+                              r-up r-low r-right r-left body fa fb)
+  ; מפענח צורת זי (Z/S): מחזיר (overall-bbox (body flangeA flangeB)) או nil.
+  ; מבנה זהה ל-ח' — 3 מלבנים חופפים (גוף מרכזי + 2 כנפיים, 2 אזורי חפיפה),
+  ; אבל שתי הפינות הקעורות באלכסון (לא חולקות קו) והכנפיים יוצאות לכיוונים מנוגדים.
+  ; תומך בכל הסיבובים: גוף אנכי (כנפיים אופקיות) או גוף אופקי (כנפיים אנכיות).
+  (setq bb     (cdt:bbox-from-verts verts)
+        tol    CDT:TOL
+        reflex (cdt:reflex-vertices verts)
+        x0 (car bb) y0 (cadr bb) x1 (caddr bb) y1 (cadddr bb))
+  (if (/= (length reflex) 2)
+    nil                                    ; חייב בדיוק 2 פינות קעורות
+    (progn
+      (setq r1 (car reflex) r2 (cadr reflex)
+            dx (abs (- (car r1)  (car r2)))
+            dy (abs (- (cadr r1) (cadr r2))))
+      (cond
+        ;; הפינות חולקות קו → זו ח' ולא זי
+        ((or (< dx tol) (< dy tol)) (setq body nil))
+        ;; ── גוף אנכי (כנפיים אופקיות): הפרש ה-X קטן מהפרש ה-Y ──
+        ((< dx dy)
+         (setq wx0   (min (car r1) (car r2))
+               wx1   (max (car r1) (car r2))
+               body  (list wx0 y0 wx1 y1)                 ; גוף לכל הגובה
+               r-up  (if (> (cadr r1) (cadr r2)) r1 r2)   ; פינה קעורה גבוהה
+               r-low (if (> (cadr r1) (cadr r2)) r2 r1))  ; פינה קעורה נמוכה
+         ;; כנף עליונה: רצועת y מ-r-up עד y1, משתרעת לצד שבו יושבת r-up
+         (setq fa (if (> (- (car r-up) wx0) tol)
+                    (list wx0 (cadr r-up) x1  y1)          ; r-up על הקצה הימני → ימינה
+                    (list x0  (cadr r-up) wx1 y1)))        ; r-up על הקצה השמאלי → שמאלה
+         ;; כנף תחתונה: רצועת y מ-y0 עד r-low, הצד ההפוך (אלכסון)
+         (setq fb (if (> (- (car r-low) wx0) tol)
+                    (list wx0 y0 x1  (cadr r-low))         ; ימינה
+                    (list x0  y0 wx1 (cadr r-low)))))      ; שמאלה
+        ;; ── גוף אופקי (כנפיים אנכיות): הפרש ה-Y קטן ──
+        (t
+         (setq wy0     (min (cadr r1) (cadr r2))
+               wy1     (max (cadr r1) (cadr r2))
+               body    (list x0 wy0 x1 wy1)                ; גוף לכל הרוחב
+               r-right (if (> (car r1) (car r2)) r1 r2)    ; פינה קעורה ימנית
+               r-left  (if (> (car r1) (car r2)) r2 r1))   ; פינה קעורה שמאלית
+         ;; כנף ימנית: רצועת x מ-r-right עד x1, מעלה/מטה לפי r-right
+         (setq fa (if (> (- (cadr r-right) wy0) tol)
+                    (list (car r-right) wy0 x1 y1)         ; r-right למעלה → כנף מעלה
+                    (list (car r-right) y0  x1 wy1)))      ; r-right למטה → כנף מטה
+         ;; כנף שמאלית: הצד ההפוך
+         (setq fb (if (> (- (cadr r-left) wy0) tol)
+                    (list x0 wy0 (car r-left) y1)          ; מעלה
+                    (list x0 y0  (car r-left) wy1)))))      ; מטה
+      (if body (list bb (list body fa fb)) nil))))
+
+(defun cdt:z-brk (lo hi e0 e1)
+  ; מחזיר את קצה הגוף (e0 או e1) שנמצא ממש בתוך הקטע (lo..hi) — נקודת שבירת השרשרת
+  (if (and (> e1 lo) (< e1 hi)) e1 e0))
+
+(defun cdt:zshape-dimensions (rects bb dim-off / body fa fb x0 y0 x1 y1 vert
+                              wx0 wx1 wy0 wy1 fUp fLo fRt fLf ylo yup
+                              faL faR fbL fbR ba bk xlf xrt faB faT fbB fbT)
+  ; 3 קווי מידה לזי (כמו ח'): שרשרת לגוף בצד נבחר (עובי כנף → מרווח → עובי כנף)
+  ; + קו לכל כנף (אורך הכנף + השלמה לרוחב הגוף). תומך בגוף אנכי ובגוף אופקי.
+  (setq body (nth 0 rects) fa (nth 1 rects) fb (nth 2 rects)
+        x0 (car bb) y0 (cadr bb) x1 (caddr bb) y1 (cadddr bb)
+        vert (> (cdt:bbox-height body) (cdt:bbox-width body)))
+  (if vert
+    ;; ── גוף אנכי: כנפיים אופקיות ──
+    (progn
+      (setq wx0 (car body) wx1 (caddr body)
+            fUp (if (> (cadr (cdt:bbox-center fa)) (cadr (cdt:bbox-center fb))) fa fb)
+            fLo (if (equal fUp fa) fb fa)
+            yup (cadr   fUp)        ; תחתית הכנף העליונה
+            ylo (cadddr fLo))       ; ראש הכנף התחתונה
+      ;; (1) שרשרת הגוף — נמדדת מצלע הגוף (wx0), קו המידה 20 יח' החוצה ממנה
+      (command "_.DIMLINEAR" (list wx0 y0)  (list wx0 ylo)
+        (list (- wx0 20.0) (* 0.5 (+ y0 ylo))))
+      (command "_.DIMLINEAR" (list wx0 ylo) (list wx0 yup)
+        (list (- wx0 20.0) (* 0.5 (+ ylo yup))))
+      (command "_.DIMLINEAR" (list wx0 yup) (list wx0 y1)
+        (list (- wx0 20.0) (* 0.5 (+ yup y1))))
+      ;; (2) כנף עליונה — למעלה: רוחב הגוף + אורך הכנף
+      (setq faL (car fUp) faR (caddr fUp) ba (cdt:z-brk faL faR wx0 wx1))
+      (command "_.DIMLINEAR" (list faL y1) (list ba y1)
+        (list (* 0.5 (+ faL ba)) (+ y1 dim-off)))
+      (command "_.DIMLINEAR" (list ba y1) (list faR y1)
+        (list (* 0.5 (+ ba faR)) (+ y1 dim-off)))
+      ;; (3) כנף תחתונה — למטה: אורך הכנף + רוחב הגוף
+      (setq fbL (car fLo) fbR (caddr fLo) bk (cdt:z-brk fbL fbR wx0 wx1))
+      (command "_.DIMLINEAR" (list fbL y0) (list bk y0)
+        (list (* 0.5 (+ fbL bk)) (- y0 dim-off)))
+      (command "_.DIMLINEAR" (list bk y0) (list fbR y0)
+        (list (* 0.5 (+ bk fbR)) (- y0 dim-off))))
+    ;; ── גוף אופקי: כנפיים אנכיות ──
+    (progn
+      (setq wy0 (cadr body) wy1 (cadddr body)
+            fRt (if (> (car (cdt:bbox-center fa)) (car (cdt:bbox-center fb))) fa fb)
+            fLf (if (equal fRt fa) fb fa)
+            xrt (car   fRt)         ; שמאל הכנף הימנית
+            xlf (caddr fLf))        ; ימין הכנף השמאלית
+      ;; (1) שרשרת הגוף — נמדדת מצלע הגוף (wy0), קו המידה 20 יח' החוצה ממנה
+      (command "_.DIMLINEAR" (list x0 wy0)  (list xlf wy0)
+        (list (* 0.5 (+ x0 xlf)) (- wy0 20.0)))
+      (command "_.DIMLINEAR" (list xlf wy0) (list xrt wy0)
+        (list (* 0.5 (+ xlf xrt)) (- wy0 20.0)))
+      (command "_.DIMLINEAR" (list xrt wy0) (list x1 wy0)
+        (list (* 0.5 (+ xrt x1)) (- wy0 20.0)))
+      ;; (2) כנף ימנית — מימין: השלמה לגובה הגוף + אורך הכנף
+      (setq faB (cadr fRt) faT (cadddr fRt) ba (cdt:z-brk faB faT wy0 wy1))
+      (command "_.DIMLINEAR" (list x1 faB) (list x1 ba)
+        (list (+ x1 dim-off) (* 0.5 (+ faB ba))))
+      (command "_.DIMLINEAR" (list x1 ba) (list x1 faT)
+        (list (+ x1 dim-off) (* 0.5 (+ ba faT))))
+      ;; (3) כנף שמאלית — משמאל
+      (setq fbB (cadr fLf) fbT (cadddr fLf) bk (cdt:z-brk fbB fbT wy0 wy1))
+      (command "_.DIMLINEAR" (list x0 fbB) (list x0 bk)
+        (list (- x0 dim-off) (* 0.5 (+ fbB bk))))
+      (command "_.DIMLINEAR" (list x0 bk) (list x0 fbT)
+        (list (- x0 dim-off) (* 0.5 (+ bk fbT))))))
+  (princ))
+
 ;;; ============================================================
 ;;; J. צורה סמלית — אוגן
 ;;; ============================================================
@@ -1576,7 +1695,7 @@
      (cdt:log (strcat "[L01] shape=" shape " (kw=" shape-kw ")"))
 
      ;; צורות שעדיין לא מומשו — הודעה מסודרת ויציאה נקייה
-     (if (member shape '("tshape" "zshape"))
+     (if (member shape '("tshape"))
        (progn (princ (strcat "\n[" shape-kw " - not yet implemented]")) (exit)))
 
      (setq sel (entsel "\nSelect column outline: "))
@@ -2019,6 +2138,132 @@
                    bar-d2      (car (cdt:closest-and-farthest-donut placed
                                       (list (caddr ch-bb) (cadr ch-bb))))
                    top-y       (+ ch-maxy 10.0)    ; כותרת מעל הגבול האמיתי (כולל המידות)
+                   cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
+
+         ;; ─── מסלול זי (Z) — מבנה זהה ל-ח': גוף + 2 כנפיים, 2 אזורי חפיפה
+         (if (= shape "zshape")
+           (progn
+             (cdt:log "[L50] zshape-path")
+             (setq verts  (cdt:get-poly-verts ename)
+                   ch-dec (cdt:zshape-decompose verts))
+             (if (null ch-dec)
+               (progn (setvar "OSMODE" prev-osmode)
+                      (princ "\nError: selected shape is not a valid Z.") (exit)))
+             (setq ch-bb    (car  ch-dec)
+                   ch-rects (cadr ch-dec)
+                   ch-mark  (entlast))   ; סמן לפני ציור — למדידת גבול אמיתי אחר כך
+             ;; גיאומטריה חיצונית — העתק הפוליגון
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
+             (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
+             (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
+             (setvar "CECOLOR" "256")
+
+             ;; ── קווי מידה
+             (cdt:log "[L50b] zshape-dims")
+             (setq prev-dimscale (getvar "DIMSCALE")
+                   dim-prev-lay  (getvar "CLAYER"))
+             (cdt:ensure-layer (cdt:get cfg "dim-layer"))
+             (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (if (and (cdt:get cfg "dim-style")
+                      (not (equal (cdt:get cfg "dim-style") "")))
+               (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
+                 (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
+                 (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             (cdt:zshape-dimensions ch-rects ch-bb CDT:DIM-OFFSET)
+             (setvar "CLAYER"   dim-prev-lay)
+             (setvar "CECOLOR"  "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
+             ;; גיאומטריות פנימיות — כל מלבן מוקטן באופסט
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
+             (foreach rc ch-rects
+               (cdt:draw-closed-rect (cdt:bbox-inset rc offset) (cdt:get cfg "int-layer")))
+             (setvar "CECOLOR" "256")
+
+             ;; ── דונאטים ── מלבנים פנימיים מוקטנים
+             (cdt:log "[L51] zshape-donuts")
+             (setq ch-beam (cdt:bbox-inset (nth 0 ch-rects) offset)   ; גוף
+                   ch-lA   (cdt:bbox-inset (nth 1 ch-rects) offset)   ; כנף A
+                   ch-lB   (cdt:bbox-inset (nth 2 ch-rects) offset)   ; כנף B
+                   ch-bcen (cdt:bbox-center ch-beam)
+                   ch-ov1  (cdt:bbox-intersect ch-beam ch-lA)
+                   ch-ov2  (cdt:bbox-intersect ch-beam ch-lB)
+                   placed  nil)
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
+             ;; 1) 8 פינות שני אזורי החפיפה
+             (setq placed (cdt:place-corner-donuts-tracked ch-ov1 donut-size donut-layer placed)
+                   placed (cdt:place-corner-donuts-tracked ch-ov2 donut-size donut-layer placed))
+             ;; 2+3) פינות קצה + מילוי צלעות לכל כנף; אוסף עוגנים לחיבור הגוף
+             (setq ch-r1 (cdt:chet-leg-donuts ch-lA ch-ov1 ch-bcen donut-size donut-layer placed)
+                   placed  (nth 0 ch-r1) ch-aof (nth 1 ch-r1) ch-arx (nth 2 ch-r1) ch-aif (nth 3 ch-r1))
+             (setq ch-r2 (cdt:chet-leg-donuts ch-lB ch-ov2 ch-bcen donut-size donut-layer placed)
+                   placed  (nth 0 ch-r2) ch-bof (nth 1 ch-r2) ch-brx (nth 2 ch-r2) ch-bif (nth 3 ch-r2))
+             ;; שתי פאות הגוף — מילוי על אותו טווח בדיוק (בין שני אזורי החפיפה),
+             ;; כך ששתי הצלעות מקבלות אותם מיקומים → דונאטים מקבילים כמו שלבי סולם.
+             ;; (ch-aof/ch-arx משמשים כאן כגבולות הטווח; הערכים שהוחזרו מהכנפיים אינם נחוצים יותר.)
+             ;; ch-bof = הסטה פנימה (donut-inset) — אותו פער דונאט-קו כמו כל שאר הדונאטים
+             (setq ch-bof (cdt:donut-inset donut-size ch-beam))
+             (if (> (cdt:bbox-height ch-beam) (cdt:bbox-width ch-beam))
+               ;; גוף אנכי → פאות שמאל/ימין, מוסטות פנימה, טווח משותף לאורך y
+               (progn
+                 (if (> (cadr ch-ov1) (cadr ch-ov2))
+                   (setq ch-aof (cadddr ch-ov2) ch-arx (cadr ch-ov1))   ; ראש חפיפה תחתונה → תחתית עליונה
+                   (setq ch-aof (cadddr ch-ov1) ch-arx (cadr ch-ov2)))
+                 (setq placed (cdt:fill-pts (list (+ (car   ch-beam) ch-bof) ch-aof)
+                                            (list (+ (car   ch-beam) ch-bof) ch-arx)
+                                            donut-size donut-layer placed)
+                       placed (cdt:fill-pts (list (- (caddr ch-beam) ch-bof) ch-aof)
+                                            (list (- (caddr ch-beam) ch-bof) ch-arx)
+                                            donut-size donut-layer placed)))
+               ;; גוף אופקי → פאות עליונה/תחתונה, מוסטות פנימה, טווח משותף לאורך x
+               (progn
+                 (if (> (car ch-ov1) (car ch-ov2))
+                   (setq ch-aof (caddr ch-ov2) ch-arx (car ch-ov1))     ; ימין חפיפה שמאלית → שמאל ימנית
+                   (setq ch-aof (caddr ch-ov1) ch-arx (car ch-ov2)))
+                 (setq placed (cdt:fill-pts (list ch-aof (+ (cadr   ch-beam) ch-bof))
+                                            (list ch-arx (+ (cadr   ch-beam) ch-bof))
+                                            donut-size donut-layer placed)
+                       placed (cdt:fill-pts (list ch-aof (- (cadddr ch-beam) ch-bof))
+                                            (list ch-arx (- (cadddr ch-beam) ch-bof))
+                                            donut-size donut-layer placed))))
+             (setvar "CECOLOR" "256")
+             (cdt:log (strcat "[L52] zshape-donuts-done placed=" (itoa (length placed))))
+
+             ;; ── גבול אמיתי של מה שצויר
+             (setq ch-ext  (cdt:ents-bbox-max ch-mark)
+                   ch-maxx (car  ch-ext)
+                   ch-maxy (cadr ch-ext))
+             (if (null ch-maxx) (setq ch-maxx (caddr  ch-bb)))
+             (if (null ch-maxy) (setq ch-maxy (cadddr ch-bb)))
+
+             ;; ── חישוקים — 3 מלבנים בפריסת זי, מימין ורחוק מהמידות
+             (cdt:log "[L53] zshape-stirrups")
+             (setq ch-sgap 30.0
+                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             (foreach srect (list ch-beam ch-lA ch-lB)
+               (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
+                                  (+ (caddr srect) ch-sdx) (cadddr srect)))
+               (cdt:draw-stirrup-rect ch-sbb (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-color")
+                 (cdt:get cfg "stirrup-txt-color"))
+               (if *cdt-bars-ok*
+                 (cdt:label-stirrup-safe ch-sbb (cdt:get cfg "stirrup-layer")
+                   (cdt:get cfg "stirrup-style")
+                   (atof (cdt:get cfg "stirrup-height"))
+                   (cdt:get cfg "stirrup-txt-color"))))
+             (cdt:log "[L54] after zshape-stirrups")
+
+             ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה
+             (setq bar-conn-pt (cdt:bar-block-conn-pt ch-bb cfg)
+                   bar-d1      (car (cdt:closest-and-farthest-donut placed
+                                      (list (car  ch-bb) (cadr ch-bb))))
+                   bar-d2      (car (cdt:closest-and-farthest-donut placed
+                                      (list (caddr ch-bb) (cadr ch-bb))))
+                   top-y       (+ ch-maxy 10.0)
                    cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
 
          ;; ─── בלוק מוטות ──────────────────────────────────────────
