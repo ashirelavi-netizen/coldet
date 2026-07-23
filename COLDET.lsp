@@ -465,9 +465,9 @@
   placed)
 
 (defun cdt:donut-inset (size bb / raw max-inset)
-  ; inset רגיל = 1.2*size (פער שפת-דונאט-לקו = 0.7*size), אבל לא יותר ממחצית הצלע
+  ; inset רגיל = 0.8*size (מיושר עם קוסטום — היה 1.2, קורב לחישוק הפנימי), אבל לא יותר ממחצית הצלע
   ; הקטנה ביותר של bb — כדי שדונאט בעמוד קטן לא "יעבור" את המרכז לצד השני
-  (setq raw      (* 1.2 size)
+  (setq raw      (* 0.8 size)
         max-inset (* 0.5 (cdt:bbox-width  bb)))
   (if (< (* 0.5 (cdt:bbox-height bb)) max-inset)
     (setq max-inset (* 0.5 (cdt:bbox-height bb))))
