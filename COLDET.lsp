@@ -1514,6 +1514,15 @@
   (if *cdt-bars-ok*
     (bars:label-stirrup bb layer txt-style txt-height txt-color)))
 
+(defun cdt:stirrup-dialog-safe (bb)
+  ; פותח את דיאלוג החישוקים פעם אחת; מחזיר vals (סוג/קוטר/פסיעה) או nil בביטול
+  (if *cdt-bars-ok* (bars:stirrup-dialog bb)))
+
+(defun cdt:draw-stirrup-label-safe (bb vals layer txt-style txt-height txt-color)
+  ; מצייר תווית חישוק מ-vals שנאספו כבר (בלי דיאלוג); L= מחושב מחדש לפי bb
+  (if (and *cdt-bars-ok* vals)
+    (bars:draw-stirrup-label bb vals layer txt-style txt-height txt-color)))
+
 (defun cdt:bar-opher (type-str)
   ; סוגים 1 ו-2 הוחלפו: בחירת 1 נותנת %%157, בחירת 2 נותנת %%156
   (cond ((= type-str "1") "%%157")
@@ -2115,7 +2124,7 @@
                    stir-w stir-h stir-x0 stir-y0 stir-bb
                    ls-bbs ls-bb1 ls-bb2 ls-int1 ls-int2 ls-donut1 ls-donut2
                    ls-overall ls-placed
-                   ls-sx0 ls-sy1 ls-sbb1 ls-sx0-2 ls-sy2 ls-sbb2
+                   ls-sx0 ls-sy1 ls-sbb1 ls-sx0-2 ls-sy2 ls-sbb2 ls-stir-vals
                    ls-mc ls-cv ls-cvx ls-cvy ls-x0 ls-y0 ls-x1 ls-y1
                    notch-top notch-right
                    h-yref h-yoff v-xref v-xoff
@@ -2133,7 +2142,7 @@
                    ch-dec ch-bb ch-rects rc
                    ch-beam ch-lA ch-lB ch-bcen ch-ov1 ch-ov2
                    ch-r1 ch-r2 ch-aof ch-arx ch-aif ch-bof ch-brx ch-bif
-                   ch-mark ch-ext ch-maxx ch-maxy ch-sgap ch-sdx ch-sbb srect
+                   ch-mark ch-ext ch-maxx ch-maxy ch-sgap ch-sdx ch-sbb srect ch-stir-vals
                    cir-cen cir-r cir-ir cir-rr cir-gap cir-n cir-i cir-ang cir-pt
                    cir-int-ent c-bb c-ext cl-e1 cl-e2
                    sp-vals sp-type sp-diam sp-spac sp-fields sp-th sp-touch sp-conn
@@ -2638,12 +2647,13 @@
                (cdt:get cfg "stirrup-txt-color"))
              (cdt:log "[L27] after ls-stirrup-1")
 
-             ;; BARS — תווית אוגן 1
-             (if *cdt-bars-ok*
-               (cdt:label-stirrup-safe ls-sbb1 (cdt:get cfg "stirrup-layer")
-                 (cdt:get cfg "stirrup-style")
-                 (atof (cdt:get cfg "stirrup-height"))
-                 (cdt:get cfg "stirrup-txt-color")))
+             ;; BARS — דיאלוג חישוקים פעם אחת (2 אוגנים), ואז תווית לכל אחד
+             (setq ls-stir-vals (cdt:stirrup-dialog-safe ls-sbb1))
+             (cdt:draw-stirrup-label-safe ls-sbb1 ls-stir-vals
+               (cdt:get cfg "stirrup-layer")
+               (cdt:get cfg "stirrup-style")
+               (atof (cdt:get cfg "stirrup-height"))
+               (cdt:get cfg "stirrup-txt-color"))
 
              (setq ls-sx0-2 (if notch-right
                              (- (car ls-sbb1) 15.0 (cdt:bbox-width  ls-int2))
@@ -2661,12 +2671,12 @@
                (cdt:get cfg "stirrup-txt-color"))
              (cdt:log "[L29] after ls-stirrup-2")
 
-             ;; BARS — תווית אוגן 2
-             (if *cdt-bars-ok*
-               (cdt:label-stirrup-safe ls-sbb2 (cdt:get cfg "stirrup-layer")
-                 (cdt:get cfg "stirrup-style")
-                 (atof (cdt:get cfg "stirrup-height"))
-                 (cdt:get cfg "stirrup-txt-color")))
+             ;; BARS — תווית אוגן 2 (אותם ערכים, L= מחושב מחדש)
+             (cdt:draw-stirrup-label-safe ls-sbb2 ls-stir-vals
+               (cdt:get cfg "stirrup-layer")
+               (cdt:get cfg "stirrup-style")
+               (atof (cdt:get cfg "stirrup-height"))
+               (cdt:get cfg "stirrup-txt-color"))
 
              ;; placed ו-conn-pt לבלוק מוטות — תחתית-ממורכז, מתחת לקו מידת הרוחב
              ;; זוג הדונאטים התחתונים (שמאל+ימין) → לידרים יורדים סימטרית למרכז
@@ -2762,6 +2772,8 @@
              (cdt:log "[L43] chet-stirrups")
              (setq ch-sgap 30.0
                    ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             ;; BARS — דיאלוג חישוקים פעם אחת (3 מלבנים), ואז תווית לכל אחד
+             (setq ch-stir-vals (cdt:stirrup-dialog-safe ch-beam))
              (foreach srect (list ch-beam ch-lA ch-lB)
                (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
                                   (+ (caddr srect) ch-sdx) (cadddr srect)))
@@ -2770,11 +2782,11 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-color")
                  (cdt:get cfg "stirrup-txt-color"))
-               (if *cdt-bars-ok*
-                 (cdt:label-stirrup-safe ch-sbb (cdt:get cfg "stirrup-layer")
-                   (cdt:get cfg "stirrup-style")
-                   (atof (cdt:get cfg "stirrup-height"))
-                   (cdt:get cfg "stirrup-txt-color"))))
+               (cdt:draw-stirrup-label-safe ch-sbb ch-stir-vals
+                 (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-txt-color")))
              (cdt:log "[L44] after chet-stirrups")
 
              ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה (זוג הדונאטים הקיצוניים התחתונים)
@@ -2889,6 +2901,8 @@
              (cdt:log "[L53] zshape-stirrups")
              (setq ch-sgap 30.0
                    ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             ;; BARS — דיאלוג חישוקים פעם אחת (3 מלבנים), ואז תווית לכל אחד
+             (setq ch-stir-vals (cdt:stirrup-dialog-safe ch-beam))
              (foreach srect (list ch-beam ch-lA ch-lB)
                (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
                                   (+ (caddr srect) ch-sdx) (cadddr srect)))
@@ -2897,11 +2911,11 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-color")
                  (cdt:get cfg "stirrup-txt-color"))
-               (if *cdt-bars-ok*
-                 (cdt:label-stirrup-safe ch-sbb (cdt:get cfg "stirrup-layer")
-                   (cdt:get cfg "stirrup-style")
-                   (atof (cdt:get cfg "stirrup-height"))
-                   (cdt:get cfg "stirrup-txt-color"))))
+               (cdt:draw-stirrup-label-safe ch-sbb ch-stir-vals
+                 (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-txt-color")))
              (cdt:log "[L54] after zshape-stirrups")
 
              ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה
@@ -2998,8 +3012,7 @@
              ;; הדיאלוג נפתח פעם אחת בלבד; L= מחושב מחדש פר-מלבן בציור התווית
              (cdt:log "[L74] custom-stirrups")
              (setq cu-stir-vals
-               (if *cdt-bars-ok*
-                 (bars:stirrup-dialog (cdt:bbox-inset (car cu-rects) offset))))
+               (cdt:stirrup-dialog-safe (cdt:bbox-inset (car cu-rects) offset)))
              (setq cu-sx (+ cu-maxx 30.0))
              (foreach rc cu-rects
                (setq bb-int (cdt:bbox-inset rc offset)
@@ -3012,12 +3025,11 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-color")
                  (cdt:get cfg "stirrup-txt-color"))
-               (if (and *cdt-bars-ok* cu-stir-vals)
-                 (bars:draw-stirrup-label cu-sbb cu-stir-vals
-                   (cdt:get cfg "stirrup-layer")
-                   (cdt:get cfg "stirrup-style")
-                   (atof (cdt:get cfg "stirrup-height"))
-                   (cdt:get cfg "stirrup-txt-color")))
+               (cdt:draw-stirrup-label-safe cu-sbb cu-stir-vals
+                 (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-txt-color"))
                (setq cu-sx (+ cu-sx cu-w 25.0)))
 
              ;; ── עוגנים לבלוק המוטות + כותרת ──
