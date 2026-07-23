@@ -901,6 +901,108 @@
         (list (- x0 dim-off) (* 0.5 (+ bk fbT))))))
   (princ))
 
+(defun cdt:vert-near-p (verts pt tol / found)
+  ; האם קיים בפוליגון קודקוד ממש ב-pt (בטולרנס) — משמש לאמת "מדרגה" אמיתית
+  ; (חתימת ט', בניגוד ל-ח' שם הצלע רציפה בלי קודקוד שם)
+  (setq found nil)
+  (foreach v verts
+    (if (and (< (abs (- (car v)  (car pt)))  tol)
+             (< (abs (- (cadr v) (cadr pt))) tol))
+      (setq found T)))
+  found)
+
+(defun cdt:tshape-decompose (verts / bb tol reflex r1 r2 x0 y0 x1 y1
+                              cn lo hi tip tip2 flange stem ffar)
+  ; מפענח צורת ט: מחזיר (overall-bbox (flange stem)) או nil אם לא תקין.
+  ; ט = כנף (רוחב מלא) + רגל אחת ממורכזת (לא מגיעה לקצוות הכנף) — בשונה מ-ח'
+  ; שם הרגליים כן מגיעות לקצוות. האימות: קיים קודקוד ב-(x0,cn)/(x1,cn) (המדרגה
+  ; של הכנף) — ב-ח' אין קודקוד כזה (הצלע שם רציפה מקצה לקצה).
+  (setq bb     (cdt:bbox-from-verts verts)
+        tol    CDT:TOL
+        reflex (cdt:reflex-vertices verts)
+        x0 (car bb)  y0 (cadr bb)  x1 (caddr bb)  y1 (cadddr bb))
+  (if (/= (length reflex) 2)
+    nil                                    ; חייב בדיוק 2 פינות קעורות
+    (progn
+      (setq r1 (car reflex)  r2 (cadr reflex)  flange nil)
+      (cond
+        ;; תקרה אופקית — הפינות חולקות Y → הרגל אנכית (כנף מלאה ברוחב)
+        ((< (abs (- (cadr r1) (cadr r2))) tol)
+         (setq cn   (cadr r1)
+               lo   (min (car r1) (car r2))
+               hi   (max (car r1) (car r2))
+               tip  (cdt:perp-coord verts lo T cn tol)
+               tip2 (cdt:perp-coord verts hi T cn tol))
+         (if (and tip tip2 (< (abs (- tip tip2)) tol)
+                  (cdt:vert-near-p verts (list x0 cn) tol)
+                  (cdt:vert-near-p verts (list x1 cn) tol))
+           (progn
+             (setq ffar (if (< tip cn) y1 y0))
+             (setq flange (list x0 (min cn ffar) x1 (max cn ffar))
+                   stem   (list lo (min cn tip) hi (max cn tip))))))
+        ;; תקרה אנכית — הפינות חולקות X → הרגל אופקית (כנף מלאה בגובה)
+        ((< (abs (- (car r1) (car r2))) tol)
+         (setq cn   (car r1)
+               lo   (min (cadr r1) (cadr r2))
+               hi   (max (cadr r1) (cadr r2))
+               tip  (cdt:perp-coord verts lo nil cn tol)
+               tip2 (cdt:perp-coord verts hi nil cn tol))
+         (if (and tip tip2 (< (abs (- tip tip2)) tol)
+                  (cdt:vert-near-p verts (list cn y0) tol)
+                  (cdt:vert-near-p verts (list cn y1) tol))
+           (progn
+             (setq ffar (if (< tip cn) x1 x0))
+             (setq flange (list (min cn ffar) y0 (max cn ffar) y1)
+                   stem   (list (min cn tip) lo (max cn tip) hi))))))
+      (if flange (list bb (list flange stem)) nil))))
+
+(defun cdt:tshape-dimensions (rects bb dim-off / flange stem horiz
+                              openLow ceilC topC hpos fY xS
+                              openLeft nearpos fX yS)
+  ; קווי מידה לצורת ט: צד פתוח = 3 מקטעים (אוזן/רגל/אוזן), ועוד אורך הרגל
+  ; + השלמה לגובה/רוחב הכולל. תומך בכנף אופקית (רגל אנכית) ובכנף אנכית (רגל אופקית).
+  (setq flange (nth 0 rects)  stem (nth 1 rects)
+        horiz  (> (cdt:bbox-width flange) (cdt:bbox-height flange)))
+  (if horiz
+    (progn
+      ;; כנף אופקית (רוחב מלא), רגל אנכית — פתח למעלה/למטה
+      (setq openLow (< (cadr stem) (cadr flange)))
+      (if openLow
+        (setq ceilC (cadr flange) topC (cadddr flange) hpos (- (cadr bb)   dim-off) fY (cadr    stem))
+        (setq ceilC (cadddr flange) topC (cadr flange) hpos (+ (cadddr bb) dim-off) fY (cadddr stem)))
+      ;; צד פתוח — אוזן שמאל / רגל / אוזן ימין
+      (command "_.DIMLINEAR" (list (car bb) fY) (list (car stem) fY)
+        (list (* 0.5 (+ (car bb) (car stem))) hpos))
+      (command "_.DIMLINEAR" (list (car stem) fY) (list (caddr stem) fY)
+        (list (* 0.5 (+ (car stem) (caddr stem))) hpos))
+      (command "_.DIMLINEAR" (list (caddr stem) fY) (list (caddr bb) fY)
+        (list (* 0.5 (+ (caddr stem) (caddr bb))) hpos))
+      ;; הרגל — אורך + השלמה לגובה הכולל
+      (setq xS (- (car stem) dim-off))
+      (command "_.DIMLINEAR" (list (car stem) fY) (list (car stem) ceilC)
+        (list xS (* 0.5 (+ fY ceilC))))
+      (command "_.DIMLINEAR" (list (car stem) ceilC) (list (car stem) topC)
+        (list xS (* 0.5 (+ ceilC topC)))))
+    (progn
+      ;; כנף אנכית (גובה מלא), רגל אופקית — פתח שמאלה/ימינה
+      (setq openLeft (< (car stem) (car flange)))
+      (if openLeft
+        (setq ceilC (car flange) topC (caddr flange) nearpos (- (car bb)   dim-off) fX (car    stem))
+        (setq ceilC (caddr flange) topC (car flange) nearpos (+ (caddr bb) dim-off) fX (caddr stem)))
+      (command "_.DIMLINEAR" (list fX (cadr bb)) (list fX (cadr stem))
+        (list nearpos (* 0.5 (+ (cadr bb) (cadr stem)))))
+      (command "_.DIMLINEAR" (list fX (cadr stem)) (list fX (cadddr stem))
+        (list nearpos (* 0.5 (+ (cadr stem) (cadddr stem)))))
+      (command "_.DIMLINEAR" (list fX (cadddr stem)) (list fX (cadddr bb))
+        (list nearpos (* 0.5 (+ (cadddr stem) (cadddr bb)))))
+      ;; הרגל — אורך + השלמה לרוחב הכולל
+      (setq yS (- (cadr stem) dim-off))
+      (command "_.DIMLINEAR" (list fX (cadr stem)) (list ceilC (cadr stem))
+        (list (* 0.5 (+ fX ceilC)) yS))
+      (command "_.DIMLINEAR" (list ceilC (cadr stem)) (list topC (cadr stem))
+        (list (* 0.5 (+ ceilC topC)) yS))))
+  (princ))
+
 ;;; ============================================================
 ;;; J. צורה סמלית — אוגן
 ;;; ============================================================
@@ -2147,7 +2249,8 @@
                    cir-int-ent c-bb c-ext cl-e1 cl-e2
                    sp-vals sp-type sp-diam sp-spac sp-fields sp-th sp-touch sp-conn
                    cu-rects cu-more cu-p1 cu-p2 cu-ans cu-bb cu-loops lp
-                   cu-mark cu-ext cu-maxx cu-maxy cu-sx cu-w cu-h cu-sbb cu-stir-vals)
+                   cu-mark cu-ext cu-maxx cu-maxy cu-sx cu-w cu-h cu-sbb cu-stir-vals
+                   t-outline t-inset)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -2201,10 +2304,6 @@
                        ((= shape-kw "CIR") "circle")
                        ((= shape-kw "CUSTOM") "custom")))
      (cdt:log (strcat "[L01] shape=" shape " (kw=" shape-kw ")"))
-
-     ;; צורות שעדיין לא מומשו — הודעה מסודרת ויציאה נקייה
-     (if (member shape '("tshape"))
-       (progn (princ (strcat "\n[" shape-kw " - not yet implemented]")) (exit)))
 
      (setq sel (entsel "\nSelect column outline: "))
      (if (null sel)
@@ -2917,6 +3016,96 @@
                  (atof (cdt:get cfg "stirrup-height"))
                  (cdt:get cfg "stirrup-txt-color")))
              (cdt:log "[L54] after zshape-stirrups")
+
+             ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה
+             (setq bar-conn-pt (cdt:bar-block-conn-pt ch-bb cfg)
+                   bar-d1      (car (cdt:closest-and-farthest-donut placed
+                                      (list (car  ch-bb) (cadr ch-bb))))
+                   bar-d2      (car (cdt:closest-and-farthest-donut placed
+                                      (list (caddr ch-bb) (cadr ch-bb))))
+                   top-y       (+ ch-maxy 10.0)
+                   cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
+
+         ;; ─── מסלול ט (T) — כנף ברוחב מלא + רגל אחת ממורכזת ──
+         (if (= shape "tshape")
+           (progn
+             (cdt:log "[L60] tshape-path")
+             (setq verts  (cdt:get-poly-verts ename)
+                   ch-dec (cdt:tshape-decompose verts))
+             (if (null ch-dec)
+               (progn (setvar "OSMODE" prev-osmode)
+                      (princ "\nError: selected shape is not a valid T.") (exit)))
+             (setq ch-bb    (car  ch-dec)
+                   ch-rects (cadr ch-dec)
+                   ch-beam  (nth 0 ch-rects)   ; כנף
+                   ch-lA    (nth 1 ch-rects)   ; רגל
+                   ch-mark  (entlast))   ; סמן לפני ציור — למדידת גבול אמיתי אחר כך
+             ;; גיאומטריה חיצונית — העתק הפוליגון
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
+             (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
+             (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
+             (setvar "CECOLOR" "256")
+
+             ;; ── קווי מידה — 3 מקטעים בצד הפתוח + אורך הרגל (כמו ח')
+             (cdt:log "[L60b] tshape-dims")
+             (setq prev-dimscale (getvar "DIMSCALE")
+                   dim-prev-lay  (getvar "CLAYER"))
+             (cdt:ensure-layer (cdt:get cfg "dim-layer"))
+             (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
+             (if (and (cdt:get cfg "dim-style")
+                      (not (equal (cdt:get cfg "dim-style") "")))
+               (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
+                 (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
+                 (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (cdt:tshape-dimensions ch-rects ch-bb CDT:DIM-OFFSET)
+             (setvar "CLAYER"   dim-prev-lay)
+             (setvar "CECOLOR"  "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
+             ;; ── גיאומטריה פנימית — מתאר שלם (כנף+רגל) מוזח פנימה כמקשה אחת (כמו קוסטום)
+             (cdt:log "[L61] tshape-inner")
+             (setq t-outline (car (cu:trace-loops (cu:union-segs (list ch-beam ch-lA))))
+                   t-inset   (cu:inset-poly t-outline offset))
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
+             (cu:draw-poly t-inset (cdt:get cfg "int-layer"))
+             (setvar "CECOLOR" "256")
+
+             ;; ── דונאטים — פינה + מילוי לאורך כל צלע של המתאר הפנימי (כולל הפינה הקעורה)
+             (cdt:log "[L62] tshape-donuts")
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
+             (setq placed (cu:poly-donuts t-inset donut-size donut-layer nil))
+             (setvar "CECOLOR" "256")
+             (cdt:log (strcat "[L63] tshape-donuts-done placed=" (itoa (length placed))))
+
+             ;; ── גבול אמיתי של מה שצויר (גיאומטריה + מידות + דונאטים)
+             (setq ch-ext  (cdt:ents-bbox-max ch-mark)
+                   ch-maxx (car  ch-ext)
+                   ch-maxy (cadr ch-ext))
+             (if (null ch-maxx) (setq ch-maxx (caddr  ch-bb)))
+             (if (null ch-maxy) (setq ch-maxy (cadddr ch-bb)))
+
+             ;; ── חישוקים — 2 מלבנים (כנף+רגל), מימין ורחוק מהמידות
+             (cdt:log "[L64] tshape-stirrups")
+             (setq ch-sgap 30.0
+                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             ;; BARS — דיאלוג חישוקים פעם אחת (2 מלבנים), ואז תווית לכל אחד
+             (setq ch-stir-vals (cdt:stirrup-dialog-safe ch-beam))
+             (foreach srect (list ch-beam ch-lA)
+               (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
+                                  (+ (caddr srect) ch-sdx) (cadddr srect)))
+               (cdt:draw-stirrup-rect ch-sbb (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-color")
+                 (cdt:get cfg "stirrup-txt-color"))
+               (cdt:draw-stirrup-label-safe ch-sbb ch-stir-vals
+                 (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-txt-color")))
+             (cdt:log "[L65] after tshape-stirrups")
 
              ;; חיבור לבלוק מוטות — אלכסון ימין-מטה מהפינה הימנית-תחתונה
              (setq bar-conn-pt (cdt:bar-block-conn-pt ch-bb cfg)
