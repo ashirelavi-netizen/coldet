@@ -53,7 +53,7 @@
   (princ (strcat "\n" msg)))
 
 ;;; ─── קבועים ─────────────────────────────────────────────────
-(setq CDT:MAX-SPACING 18.0)   ; רווח מקסימלי בין דונאטים
+(setq CDT:MAX-SPACING 19.0)   ; רווח מקסימלי בין דונאטים
 (setq CDT:LEAD-DIST   10.0)   ; מרחק נקודת חיבור ליידר
 (setq CDT:HOOK-LEN    10.0)   ; אורך וו אוגן
 (setq CDT:HOOK-EXT     3.0)   ; הרחבה ויזואלית של וו (הפרדה)
@@ -373,6 +373,31 @@
   (command "_.DONUT" 0 size center "")
   (setvar "CLAYER" prev)
   (entlast))
+
+(defun cdt:draw-circle (center radius layer / prev e)
+  ; מצייר מעגל בשכבה נתונה ומחזיר את הישות
+  (cdt:ensure-layer layer)
+  (setq prev (getvar "CLAYER"))
+  (setvar "CLAYER" layer)
+  (command "_.CIRCLE" center radius)
+  (setq e (entlast))
+  (setvar "CLAYER" prev)
+  e)
+
+(defun cdt:ensure-linetype (lt)
+  ; טוען סוג קו (למשל CENTER) אם אינו קיים בסרטוט
+  (if (not (tblsearch "LTYPE" lt))
+    (vl-catch-all-apply 'command (list "_.-LINETYPE" "_Load" lt "acad.lin" ""))))
+
+(defun cdt:set-center-lt (e / ed)
+  ; קובע סוג-קו CENTER ו-LTScale=1 ישירות על הישות (בלי לגעת ב-CELTYPE הגלובלי)
+  (if (and e (tblsearch "LTYPE" "CENTER"))
+    (progn
+      (setq ed (entget e))
+      (setq ed (vl-remove-if '(lambda (x) (or (= (car x) 6) (= (car x) 48))) ed))
+      (setq ed (append ed (list (cons 6 "CENTER") (cons 48 1.0))))
+      (entmod ed)
+      (entupd e))))
 
 (defun cdt:draw-text-center (pt height style txt layer angle mirror / ename use-style base-list)
   (cdt:ensure-layer layer)
@@ -997,13 +1022,14 @@
   (cdt:draw-text-center (list cx-num y1) hn style-num col-num layer 0 nil)
   (setvar "CECOLOR" "256")
 
-  ; קו מפריד — באורך השורה העליונה (מספר + עברית) + 3 יחידות מכל צד, ממורכז
-  (setq half-w (+ (if (equal txt1 "")
-                    (* 0.5 w-num)
-                    (* 0.5 (+ w-heb gap-btw w-num)))
-                  3.0)
-        x0     (- cx half-w)
-        x1     (+ cx half-w))
+  ; קו מפריד — מעוגן לקצוות הטקסט עצמו: משמאל קצה המספר, מימין קצה העברית,
+  ; + 3 יח' מכל צד. כך הוא מיושר עם הטקסט גם כשהמרכוז אינו מדויק.
+  ; רוחב עברי נדיב (0.75) לקצה הימני, כי textbox מזלזל בעברית.
+  (if (equal txt1 "")
+    (setq x0 (- cx-num (* 0.5 w-num) 3.0)
+          x1 (+ cx-num (* 0.5 w-num) 3.0))
+    (setq x0 (- cx-num (* 0.5 w-num) 3.0)
+          x1 (+ cx-heb (* 0.5 (max w-heb (* (strlen txt1) h1 0.75))) 7.0)))
   (setvar "CECOLOR" col-line)
   (setq sep-line (cdt:draw-line (list x0 yl) (list x1 yl) layer))
   (setvar "CECOLOR" "256")
@@ -1102,18 +1128,20 @@
 
 ; --- כתיבה וקריאה של ערכי הדיאלוג ---
 
-(defun cdt:dialog-write (cfg / ll sl)
+(defun cdt:dialog-write (cfg / ll sl dl)
   (setq ll (cdt:get-all-layers)
         sl (cdt:get-all-txtstyles)
+        dl (cdt:get-all-dimstyles)
         *cdt-layer-list* ll
-        *cdt-style-list* sl)
+        *cdt-style-list* sl
+        *cdt-dimstyle-list* dl)
   ; מילוי רשימות
   (cdt:fill-popup "ext_layer"     ll)  (cdt:fill-popup "int_layer"     ll)
   (cdt:fill-popup "donut_layer"   ll)  (cdt:fill-popup "dim_layer"     ll)
   (cdt:fill-popup "title_layer1"  ll)  (cdt:fill-popup "title_layer2"  ll)
   (cdt:fill-popup "stirrup_layer" ll)
   (cdt:fill-popup "leader_layer"  ll)
-  (cdt:fill-popup "dim_style"        sl)
+  (cdt:fill-popup "dim_style"        dl)
   (cdt:fill-popup "stir_style"       sl)
   (cdt:fill-popup "donut_txt_style"  sl)
   (cdt:fill-popup "title_style1" sl)  (cdt:fill-popup "title_style2"  sl)
@@ -1128,7 +1156,7 @@
   (cdt:set-popup "stirrup_layer"  ll (cdt:get cfg "stirrup-layer"))
   (cdt:set-popup "leader_layer"   ll (cdt:get cfg "leader-layer"))
   ; בחירה נוכחית — סגנונות
-  (cdt:set-popup "dim_style"        sl (cdt:get cfg "dim-style"))
+  (cdt:set-popup "dim_style"        dl (cdt:get cfg "dim-style"))
   (cdt:set-popup "stir_style"       sl (cdt:get cfg "stirrup-style"))
   (cdt:set-popup "donut_txt_style"  sl (cdt:get cfg "donut-txt-style"))
   (cdt:set-popup "title_style1"     sl (cdt:get cfg "title-style1"))
@@ -1151,7 +1179,7 @@
   (set_tile "bar_len"       (cdt:str-or-empty (cdt:get cfg "bar-length")))
   (set_tile "stir_height"        (cdt:str-or-empty (cdt:get cfg "stirrup-height")))
   (set_tile "donut_txt_height"   (cdt:str-or-empty (cdt:get cfg "donut-txt-height")))
-  (set_tile "dim_scale"          (rtos (getvar "DIMSCALE") 2 0))
+  (set_tile "dim_scale"          (cdt:str-or-empty (cdt:get cfg "dim-scale")))
   (set_tile "title_height1"      (cdt:str-or-empty (cdt:get cfg "title-height1")))
   (set_tile "title_height2"      (cdt:str-or-empty (cdt:get cfg "title-height2")))
   (set_tile "title_flip1"        (cdt:str-or-empty (cdt:get cfg "title-flip1")))
@@ -1170,7 +1198,7 @@
   (setq cfg (cdt:set! cfg "stirrup-layer" (cdt:get-popup "stirrup_layer" *cdt-layer-list*)))
   (setq cfg (cdt:set! cfg "leader-layer"  (cdt:get-popup "leader_layer"  *cdt-layer-list*)))
   ; סגנונות
-  (setq cfg (cdt:set! cfg "dim-style"      (cdt:get-popup "dim_style"       *cdt-style-list*)))
+  (setq cfg (cdt:set! cfg "dim-style"      (cdt:get-popup "dim_style"       *cdt-dimstyle-list*)))
   (setq cfg (cdt:set! cfg "stirrup-style"  (cdt:get-popup "stir_style"      *cdt-style-list*)))
   (setq cfg (cdt:set! cfg "donut-txt-style" (cdt:get-popup "donut_txt_style" *cdt-style-list*)))
   ; צבעים — קריאה מ-edit_box
@@ -1232,7 +1260,7 @@
                       (strcat (cdt:bar-opher type-res) diam-res " L=" len-res)))))))
   cfg)
 
-(defun cdt:settings-dialog (cfg-in / dlg-id done ldir res ent ed old-dimstyle)
+(defun cdt:settings-dialog (cfg-in / dlg-id done ldir res ent ed old-dimstyle dsc)
   (setq *cdt-dlg-vals*  cfg-in
         *cdt-pick-code* nil
         *cdt-dialog-ok* nil
@@ -1373,8 +1401,15 @@
                             (not (equal (cdr (assoc 3 ed)) ""))
                             (tblsearch "DIMSTYLE" (cdr (assoc 3 ed))))
                      (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "dim-style" (cdr (assoc 3 ed)))))
+                   ;; קנה מידה של המידה הנבחרת — מסגנון המידה שלה (group 40), אחרת DIMSCALE הנוכחי
+                   (setq dsc (cond
+                               ((and (assoc 3 ed)
+                                     (tblsearch "DIMSTYLE" (cdr (assoc 3 ed)))
+                                     (assoc 40 (tblsearch "DIMSTYLE" (cdr (assoc 3 ed)))))
+                                (cdr (assoc 40 (tblsearch "DIMSTYLE" (cdr (assoc 3 ed))))))
+                               (t (getvar "DIMSCALE"))))
                    (setq *cdt-dlg-vals* (cdt:set! *cdt-dlg-vals* "dim-scale"
-                     (rtos (getvar "DIMSCALE") 2 4))))))
+                     (rtos dsc 2 4))))))
 
               ; Pick: כותרת עליונה — שכבה + סגנון + גובה + צבע
               ((equal *cdt-pick-code* 8)
@@ -1480,8 +1515,9 @@
     (bars:label-stirrup bb layer txt-style txt-height txt-color)))
 
 (defun cdt:bar-opher (type-str)
-  (cond ((= type-str "1") "%%156")
-        ((= type-str "2") "%%157")
+  ; סוגים 1 ו-2 הוחלפו: בחירת 1 נותנת %%157, בחירת 2 נותנת %%156
+  (cond ((= type-str "1") "%%157")
+        ((= type-str "2") "%%156")
         ((= type-str "3") "%%158")
         (t                "%%159")))
 
@@ -1575,6 +1611,88 @@
   (if edge2 (cdt:draw-line edge2 near-pt layer))
   (command "_.COLOR" "BYLAYER"))
 
+(defun cdt:draw-spiral-block (touch-pt conn-pt dir fields layer leader-color
+                               txt-style txt-height txt-color /
+                               txt lx ly line-y txt-h gap tb txt-w line-len
+                               far-x text-cx text-y use-style ins-pt)
+  ; בלוק ספירלה: לידר נוגע במעגל הפנימי (touch-pt) → קו תחתון → טקסט מעליו דרך
+  ; bars:draw-label (קריאה בלבד ל-BARS). conn-pt = הקצה שאליו מתחבר הלידר (הקרוב למעגל).
+  ; dir=+1 → הקו נמתח ימינה (כמו בלוק הדונאטים); dir=-1 → שמאלה (תמונת מראה).
+  (setq txt    (if *cdt-bars-ok* (bars:build-label-text fields) "")
+        lx     (car  conn-pt)
+        ly     (cadr conn-pt)
+        txt-h  (if (and txt-height (> txt-height 0.0)) txt-height 2.5)
+        gap    1.0
+        line-y ly)
+  (setq use-style
+    (cond
+      ((and txt-style (not (equal txt-style "")) (tblsearch "STYLE" txt-style)) txt-style)
+      ((tblsearch "STYLE" "OPHER") "OPHER")
+      (t "Standard")))
+  (setq tb (vl-catch-all-apply 'textbox
+              (list (list (cons 0 "TEXT") (cons 1 txt) (cons 40 txt-h) (cons 7 use-style)))))
+  (setq txt-w (if (and tb (not (vl-catch-all-error-p tb)) (listp tb) (listp (cadr tb)))
+                (car (cadr tb))
+                (* (strlen txt) txt-h 0.6))
+        line-len (+ txt-w 6.0)                ; רוחב הטקסט + 3 יח' מכל צד
+        far-x    (+ lx (* dir line-len))      ; הקצה הרחוק של הקו (לפי הכיוון)
+        text-cx  (+ lx (* dir 0.5 line-len))  ; מרכז הטקסט
+        text-y   (+ ly gap)                   ; בסיס הטקסט צמוד מעל הקו (כמו בלוק הדונאטים)
+        ins-pt   (list (- text-cx (* 0.5 txt-w)) text-y))   ; שמאל הטקסט → ממורכז על הקו
+  (if *cdt-bars-ok* (bars:ensure-opher-style))
+  ;; קווים — לידר וקו תחתון
+  (command "_.COLOR" (if (and leader-color (not (equal leader-color ""))) leader-color "BYLAYER"))
+  (cdt:draw-line (list lx line-y) (list far-x line-y) layer)   ; קו תחתון
+  (cdt:draw-line touch-pt (list lx line-y) layer)              ; לידר למעגל הפנימי
+  (command "_.COLOR" "BYLAYER")
+  ;; טקסט — דרך BARS (קריאה בלבד; הקידומת "ספירלה" היא נתון, לא עריכת קוד)
+  (if *cdt-bars-ok*
+    (progn
+      (setvar "CECOLOR" (if (and txt-color (not (equal txt-color ""))) (cdt:color-str txt-color) "256"))
+      ;; style=nil → OPHER (default) ; color passed explicitly (ACI string)
+      (bars:draw-label ins-pt fields (bars:make-id) "" layer txt-h 0
+                       nil
+                       (if (and txt-color (not (equal txt-color "")))
+                         (cdt:color-str txt-color) nil))
+      (setvar "CECOLOR" "256"))))
+
+;; ── חלון "ספירלה" — חלון משלנו ב-COLDET (כדי שהכותרת תהיה "ספירלה" ולא
+;;    "חישוקים", ובלי שדה כמות). עברית כ-octal Windows-1255. לא נוגע ב-BARS.
+(defun cdt:spiral-dialog (/ tlabels tchars diams path dlg-id
+                            btype-idx diam-idx spac)
+  ; משתמש בקובץ DCL קבוע (coldet_spiral.dcl, קידוד Windows-1255) — כך העברית
+  ; מובטחת, במקום כתיבת קובץ זמני עם קודי אוקטל שלא נקראים נכון מ-UTF-8-with-BOM.
+  (setq tlabels (list "1" "2" "3" "4")
+        tchars  (list "%%157" "%%156" "%%158" "%%159")   ; סוגים 1↔2 הוחלפו
+        diams   (list "6" "8" "10" "12" "14" "16" "18" "20"
+                      "22" "24" "26" "28" "30" "32" "34" "36" "38" "40")
+        path    (strcat (cdt:lsp-dir) "\\coldet_spiral.dcl")
+        *cdt-spiral-ok* nil)
+  (if (null (findfile path)) nil
+    (progn
+      (setq dlg-id (load_dialog path))
+      (if (or (null dlg-id) (not (numberp dlg-id)) (< dlg-id 0)) nil
+        (if (not (new_dialog "coldet_spiral" dlg-id))
+          (progn (unload_dialog dlg-id) nil)
+          (progn
+            (start_list "btype") (foreach tt tlabels (add_list tt)) (end_list)
+            (start_list "diam")  (foreach d diams (add_list d)) (end_list)
+            (set_tile "btype" "0")
+            (set_tile "diam"  (itoa (cdt:list-index diams "8")))
+            (set_tile "spac"  "20")
+            (action_tile "sp_ok"
+              "(setq *cdt-spiral-ok* T *csd-btype* (get_tile \"btype\") *csd-diam* (get_tile \"diam\") *csd-spac* (get_tile \"spac\"))(done_dialog 0)")
+            (action_tile "sp_cancel" "(done_dialog 0)")
+            (start_dialog)
+            (unload_dialog dlg-id)
+            (if *cdt-spiral-ok*
+              (progn
+                (setq btype-idx (atoi *csd-btype*)
+                      diam-idx  (atoi *csd-diam*)
+                      spac      *csd-spac*)
+                (list (nth btype-idx tchars) (nth diam-idx diams) spac))
+              nil)))))))
+
 (defun cdt:bar-popup-dialog (cfg / dlg-id qt-list dm-list)
   (setq *cdt-bar-ok* nil
         qt-list (list "1" "2" "3" "4")
@@ -1611,6 +1729,381 @@
           cfg)))))
 
 ;;; ============================================================
+;;; F3. מנוע צורה מורכבת — "קוסטום"
+;;; ============================================================
+;;; המשתמש בוחר את מתאר העמוד (עותק מדויק) ובנפרד מסמן מלבנים
+;;; שמגדירים את הזיון והמידות. הפונקציות כאן מחשבות את מתאר
+;;; האיחוד של המלבנים בשיטת "רשת" מספרית (בלי פקודות איחוד של הקאד),
+;;; ומהמתאר גוזרות דונאטים, קו כיסוי פנימי וקווי מידה.
+
+(defun cu:pt-eq (a b)
+  ; השוואת שתי נקודות בטולרנס קטן
+  (and (< (abs (- (car a)  (car b)))  1e-6)
+       (< (abs (- (cadr a) (cadr b))) 1e-6)))
+
+(defun cu:insert-sorted (x lst)
+  ; הכנסת מספר לרשימה ממוינת (עולה)
+  (cond
+    ((null lst) (list x))
+    ((<= x (car lst)) (cons x lst))
+    (t (cons (car lst) (cu:insert-sorted x (cdr lst))))))
+
+(defun cu:num-sort (lst / res x)
+  (setq res nil)
+  (foreach x lst (setq res (cu:insert-sorted x res)))
+  res)
+
+(defun cu:sort-uniq (lst / res dup x y)
+  ; מיון עולה + הסרת כפילויות (בלי vl-sort — בטוח ל-ZWCAD)
+  (setq res nil)
+  (foreach x lst
+    (setq dup nil)
+    (foreach y res (if (< (abs (- x y)) 1e-6) (setq dup T)))
+    (if (not dup) (setq res (cons x res))))
+  (cu:num-sort res))
+
+(defun cu:pt-in-rect (pt r)
+  ; נקודה בתוך מלבן (בדיקה חמורה — משמש למרכזי תאים שלעולם לא על הקצה)
+  (and (> (car pt)  (car r))   (< (car pt)  (caddr r))
+       (> (cadr pt) (cadr r))  (< (cadr pt) (cadddr r))))
+
+(defun cu:pt-in-any (pt rects / hit r)
+  (setq hit nil)
+  (foreach r rects (if (cu:pt-in-rect pt r) (setq hit T)))
+  hit)
+
+(defun cu:union-segs (rects / xs ys nx ny i j midx midy lin rin bin ain segs r)
+  ; מחזיר רשימת קטעי-גבול (כל קטע = (p q)) של איחוד המלבנים.
+  ; בונה רשת מכל קווי ה-X/Y, ובודק לכל תא אם מרכזו בתוך הצורה.
+  (setq xs nil ys nil)
+  (foreach r rects
+    (setq xs (cons (car r) (cons (caddr r) xs))
+          ys (cons (cadr r) (cons (cadddr r) ys))))
+  (setq xs (cu:sort-uniq xs)  ys (cu:sort-uniq ys)
+        nx (length xs)  ny (length ys)  segs nil)
+  ;; קטעים אנכיים: על x=xs[i], XOR בין תא שמאלי (i-1) לימני (i)
+  (setq i 0)
+  (while (< i nx)
+    (setq j 0)
+    (while (< j (1- ny))
+      (setq midy (* 0.5 (+ (nth j ys) (nth (1+ j) ys)))
+            lin  (and (> i 0)
+                      (cu:pt-in-any (list (* 0.5 (+ (nth (1- i) xs) (nth i xs))) midy) rects))
+            rin  (and (< i (1- nx))
+                      (cu:pt-in-any (list (* 0.5 (+ (nth i xs) (nth (1+ i) xs))) midy) rects)))
+      (if (not (eq (not lin) (not rin)))
+        (setq segs (cons (list (list (nth i xs) (nth j ys))
+                               (list (nth i xs) (nth (1+ j) ys))) segs)))
+      (setq j (1+ j)))
+    (setq i (1+ i)))
+  ;; קטעים אופקיים: על y=ys[j], XOR בין תא תחתון (j-1) לעליון (j)
+  (setq j 0)
+  (while (< j ny)
+    (setq i 0)
+    (while (< i (1- nx))
+      (setq midx (* 0.5 (+ (nth i xs) (nth (1+ i) xs)))
+            bin  (and (> j 0)
+                      (cu:pt-in-any (list midx (* 0.5 (+ (nth (1- j) ys) (nth j ys)))) rects))
+            ain  (and (< j (1- ny))
+                      (cu:pt-in-any (list midx (* 0.5 (+ (nth j ys) (nth (1+ j) ys)))) rects)))
+      (if (not (eq (not bin) (not ain)))
+        (setq segs (cons (list (list (nth i xs) (nth j ys))
+                               (list (nth (1+ i) xs) (nth j ys))) segs)))
+      (setq i (1+ i)))
+    (setq j (1+ j)))
+  segs)
+
+(defun cu:merge-collinear (pts / n res i a b c)
+  ; מסיר קודקודי-ביניים הנמצאים על אותו קו ישר (אופקי/אנכי)
+  (setq n (length pts) res nil i 0)
+  (while (< i n)
+    (setq a (nth (rem (+ i (1- n)) n) pts)
+          b (nth i pts)
+          c (nth (rem (1+ i) n) pts))
+    (if (not (or (and (< (abs (- (car a) (car b))) 1e-6) (< (abs (- (car b) (car c))) 1e-6))
+                 (and (< (abs (- (cadr a) (cadr b))) 1e-6) (< (abs (- (cadr b) (cadr c))) 1e-6))))
+      (setq res (cons b res)))
+    (setq i (1+ i)))
+  (reverse res))
+
+(defun cu:trace-loops (segs / pool loops seg start cur nxt found keep pts s)
+  ; מפרק את קטעי-הגבול ללולאות סגורות ומסודרות; ממזג קודקודים קולינאריים.
+  ; מניח מרכיב פשוט (דרגה 2 בכל קודקוד) — טיפוסי לעמוד.
+  (setq pool segs loops nil)
+  (while pool
+    (setq seg   (car pool)  pool (cdr pool)
+          start (car seg)   cur  (cadr seg)
+          pts   (list start))
+    (while (and cur (not (cu:pt-eq cur start)))
+      (setq pts (cons cur pts) found nil keep nil)
+      (foreach s pool
+        (if (and (not found)
+                 (or (cu:pt-eq (car s) cur) (cu:pt-eq (cadr s) cur)))
+          (setq found s
+                nxt (if (cu:pt-eq (car s) cur) (cadr s) (car s)))
+          (setq keep (cons s keep))))
+      (if found (setq pool keep  cur nxt) (setq cur nil)))
+    (if (> (length pts) 2)
+      (setq loops (cons (cu:merge-collinear (reverse pts)) loops))))
+  loops)
+
+(defun cu:poly-area (pts / n i a b s)
+  (setq n (length pts) s 0.0 i 0)
+  (while (< i n)
+    (setq a (nth i pts) b (nth (rem (1+ i) n) pts)
+          s (+ s (- (* (car a) (cadr b)) (* (car b) (cadr a)))))
+    (setq i (1+ i)))
+  (* 0.5 s))
+
+(defun cu:ccw (pts)
+  ; מחזיר את הקודקודים בכיוון נגד-השעון (שטח חתום חיובי)
+  (if (< (cu:poly-area pts) 0.0) (reverse pts) pts))
+
+(defun cu:inset-poly (pts d / n edges i a b dx dy res prevE curE)
+  ; הזחת מצולע מלבני (צלעות מקבילות לצירים) פנימה ב-d. pts מנורמלים ל-CCW.
+  (setq pts (cu:ccw pts)  n (length pts)  edges nil  i 0)
+  (while (< i n)
+    (setq a (nth i pts)  b (nth (rem (1+ i) n) pts)
+          dx (- (car b) (car a))  dy (- (cadr b) (cadr a)))
+    (if (< (abs dy) 1e-6)
+      (setq edges (cons (list 'H (+ (cadr a) (* d (if (> dx 0) 1.0 -1.0)))) edges))   ; אופקית → y'
+      (setq edges (cons (list 'V (- (car a) (* d (if (> dy 0) 1.0 -1.0)))) edges)))   ; אנכית  → x'
+    (setq i (1+ i)))
+  (setq edges (reverse edges)  res nil  i 0)
+  (while (< i n)
+    (setq prevE (nth (rem (+ i (1- n)) n) edges)  curE (nth i edges))
+    (if (eq (car prevE) 'H)
+      (setq res (cons (list (cadr curE)  (cadr prevE)) res))    ; x מהצלע האנכית, y מהאופקית
+      (setq res (cons (list (cadr prevE) (cadr curE))  res)))
+    (setq i (1+ i)))
+  (reverse res))
+
+(defun cu:draw-poly (pts layer / prev p)
+  ; מצייר פוליליין סגור מרשימת קודקודים (מכבד CECOLOR שנקבע בחוץ)
+  (cdt:ensure-layer layer)
+  (setq prev (getvar "CLAYER"))
+  (setvar "CLAYER" layer)
+  (command "_.PLINE")
+  (foreach p pts (command (list (car p) (cadr p))))
+  (command "_Close")
+  (setvar "CLAYER" prev)
+  (entlast))
+
+(defun cu:poly-donuts (pts size layer placed / n i a b)
+  ; דונאט בכל קודקוד + מילוי לאורך כל צלע (עם מעקב כדי למנוע כפילויות)
+  (setq n (length pts) i 0)
+  (while (< i n)
+    (setq placed (cdt:donut-if-new (nth i pts) size layer placed) i (1+ i)))
+  (setq i 0)
+  (while (< i n)
+    (setq a (nth i pts) b (nth (rem (1+ i) n) pts)
+          placed (cdt:fill-pts a b size layer placed) i (1+ i)))
+  placed)
+
+(defun cu:external-p (pt odx ody rects dist / probe hit)
+  ; הצלע חיצונית אם נקודת-בדיקה (צעד קטן החוצה בכיוון (odx,ody)) אינה בתוך אף מלבן
+  (setq probe (list (+ (car pt) (* odx dist)) (+ (cadr pt) (* ody dist)))
+        hit nil)
+  (foreach r rects (if (cu:pt-in-rect probe r) (setq hit T)))
+  (not hit))
+
+(defun cu:edge-donuts-filtered (a b odx ody rects dist size layer placed / len n i tp p)
+  ; דונאטים על הקטע a..b (כולל הקצוות) במרווח אחיד, רק היכן שהצלע חיצונית
+  (setq len (cdt:dist2d a b)
+        n   (cdt:ceiling-int (/ len CDT:MAX-SPACING))
+        i 0)
+  (while (<= i n)
+    (setq tp (if (= n 0) 0.0 (/ (* 1.0 i) n))
+          p  (cdt:lerp a b tp))
+    (if (cu:external-p p odx ody rects dist)
+      (setq placed (cdt:donut-if-new p size layer placed)))
+    (setq i (1+ i)))
+  placed)
+
+(defun cu:gap-fill (placed rects size ins layer / ys xs yv xv rowx rowy prev nseg k pos p
+                    mx my ua da um dm la ra lm rm)
+  ; מילוי מרווחים: בין 2 דונאטים סמוכים על אותו קו (אופקי/אנכי) שהמרחק > CDT:MAX-SPACING,
+  ; מוסיף דונאטים המחלקים לחלקים שווים — אך **רק אם הקו הוא פאה חיצונית**
+  ; (חומר בצד אחד, אוויר בצד השני). קו פנימי (חומר משני הצדדים) לא מתמלא.
+  ;; מעבר אופקי — לכל קו y
+  (setq ys (cu:sort-uniq (mapcar 'cadr placed)))
+  (foreach yv ys
+    (setq rowx nil)
+    (foreach p placed (if (< (abs (- (cadr p) yv)) 0.1) (setq rowx (cons (car p) rowx))))
+    (setq rowx (cu:sort-uniq rowx) prev nil)
+    (foreach xv rowx
+      (if (and prev (> (- xv prev) CDT:MAX-SPACING))
+        (progn
+          (setq mx (* 0.5 (+ prev xv))
+                ua (not (cu:pt-in-any (list mx (+ yv ins 1.0)) rects))   ; אוויר מעל הפאה?
+                da (not (cu:pt-in-any (list mx (- yv ins 1.0)) rects))   ; אוויר מתחת לפאה?
+                um (cu:pt-in-any (list mx (+ yv 1.0)) rects)             ; חומר מעל הקו?
+                dm (cu:pt-in-any (list mx (- yv 1.0)) rects))            ; חומר מתחת לקו?
+          (if (or (and dm ua) (and um da))   ; פאה חיצונית: חומר בצד אחד, אוויר בשני
+            (progn
+              (setq nseg (cdt:ceiling-int (/ (- xv prev) CDT:MAX-SPACING)) k 1)
+              (while (< k nseg)
+                (setq pos (list (+ prev (* (/ (* 1.0 k) nseg) (- xv prev))) yv)
+                      placed (cdt:donut-if-new pos size layer placed) k (1+ k)))))))
+      (setq prev xv)))
+  ;; מעבר אנכי — לכל קו x
+  (setq xs (cu:sort-uniq (mapcar 'car placed)))
+  (foreach xv xs
+    (setq rowy nil)
+    (foreach p placed (if (< (abs (- (car p) xv)) 0.1) (setq rowy (cons (cadr p) rowy))))
+    (setq rowy (cu:sort-uniq rowy) prev nil)
+    (foreach yv rowy
+      (if (and prev (> (- yv prev) CDT:MAX-SPACING))
+        (progn
+          (setq my (* 0.5 (+ prev yv))
+                la (not (cu:pt-in-any (list (- xv ins 1.0) my) rects))  ; אוויר משמאל לפאה?
+                ra (not (cu:pt-in-any (list (+ xv ins 1.0) my) rects))  ; אוויר מימין לפאה?
+                lm (cu:pt-in-any (list (- xv 1.0) my) rects)            ; חומר משמאל לקו?
+                rm (cu:pt-in-any (list (+ xv 1.0) my) rects))           ; חומר מימין לקו?
+          (if (or (and rm la) (and lm ra))   ; פאה חיצונית אנכית
+            (progn
+              (setq nseg (cdt:ceiling-int (/ (- yv prev) CDT:MAX-SPACING)) k 1)
+              (while (< k nseg)
+                (setq pos (list xv (+ prev (* (/ (* 1.0 k) nseg) (- yv prev))))
+                      placed (cdt:donut-if-new pos size layer placed) k (1+ k)))))))
+      (setq prev yv)))
+  placed)
+
+(defun cu:tie-donuts (rects size offset layer placed / dinset ins bi c r lp)
+  ; לוגיקת הדונאטים לצורת קוסטום (לפי הכלל שהוכתב):
+  ;  1) צור דונאט בכל פינה של כל מלבן פנימי (מוקטן ב-offset+dinset) — כולל צמתים.
+  ;  1ב) דונאט בכל קודקוד של מתאר האיחוד המוזח פנימה — מכסה פינות קעורות בין מלבנים.
+  ;  2) מחק כפילויות (פינות מתלכדות) — donut-if-new אוטומטי.
+  ;  3+4) בין כל 2 דונאטים סמוכים על אותו קו שהמרווח ביניהם > CDT:MAX-SPACING — הוסף דונאטים
+  ;     שמחלקים לחלקים שווים (רק אם הקטע בחומר). מכסה היקף חיצוני וקווים פנימיים.
+  (setq dinset (* 0.8 size)   ; מרחק הדונאט מקו הכיסוי הפנימי (היה 1.2 — הוקטן לקירוב)
+        ins    (+ offset dinset))
+  (foreach r rects
+    (setq bi (cdt:bbox-inset r ins))
+    (foreach c (cdt:bbox-corners bi)
+      (setq placed (cdt:donut-if-new c size layer placed))))
+  (foreach lp (mapcar 'cu:ccw (cu:trace-loops (cu:union-segs rects)))
+    (foreach c (cu:inset-poly lp ins)
+      (setq placed (cdt:donut-if-new c size layer placed))))
+  (setq placed (cu:gap-fill placed rects size ins layer))
+  placed)
+
+(defun cu:overlap-donuts (rects offset size layer placed / n i j ri rj ov)
+  ; דונאטים בפינות אזורי החפיפה בין כל זוג מלבנים — כמו ח'/זי/ר'.
+  ; משלים את הזיון בצמתים הפנימיים (שם הצלעות החיצוניות נגמרות).
+  (setq n (length rects) i 0)
+  (while (< i (1- n))
+    (setq ri (cdt:bbox-inset (nth i rects) offset) j (1+ i))
+    (while (< j n)
+      (setq rj (cdt:bbox-inset (nth j rects) offset)
+            ov (cdt:bbox-intersect ri rj))
+      (if (and (> (- (caddr ov)  (car ov))  (* 0.5 size))
+               (> (- (cadddr ov) (cadr ov)) (* 0.5 size)))
+        (setq placed (cdt:place-corner-donuts-tracked ov size layer placed)))
+      (setq j (1+ j)))
+    (setq i (1+ i)))
+  placed)
+
+;;; ── מידות קוסטום — 4 פאות, כל פאה נשברת לפי הפרופיל של הקו שלה ──
+
+(defun cu:cell-in (rects xs ys i j)
+  ; האם מרכז התא (i,j) ברשת בתוך החומר
+  (cu:pt-in-any (list (* 0.5 (+ (nth i xs) (nth (1+ i) xs)))
+                      (* 0.5 (+ (nth j ys) (nth (1+ j) ys)))) rects))
+
+(defun cu:col-level (rects xs ys ny i is-bottom / j found lvl)
+  ; רמת ה-y של הפרופיל התחתון (is-bottom=T) או העליון בעמודת-x מס' i; nil אם ריק
+  (setq found nil lvl nil)
+  (if is-bottom
+    (progn (setq j 0)
+      (while (and (< j (1- ny)) (not found))
+        (if (cu:cell-in rects xs ys i j) (setq found T lvl (nth j ys)))
+        (setq j (1+ j))))
+    (progn (setq j (- ny 2))
+      (while (and (>= j 0) (not found))
+        (if (cu:cell-in rects xs ys i j) (setq found T lvl (nth (1+ j) ys)))
+        (setq j (1- j)))))
+  lvl)
+
+(defun cu:row-level (rects xs ys nx j is-left / i found lvl)
+  ; רמת ה-x של הפרופיל השמאלי (is-left=T) או הימני בשורת-y מס' j; nil אם ריק
+  (setq found nil lvl nil)
+  (if is-left
+    (progn (setq i 0)
+      (while (and (< i (1- nx)) (not found))
+        (if (cu:cell-in rects xs ys i j) (setq found T lvl (nth i xs)))
+        (setq i (1+ i))))
+    (progn (setq i (- nx 2))
+      (while (and (>= i 0) (not found))
+        (if (cu:cell-in rects xs ys i j) (setq found T lvl (nth (1+ i) xs)))
+        (setq i (1- i)))))
+  lvl)
+
+(defun cu:closer (a b use-min)
+  ; הרמה הקרובה יותר לקו המידה: min לפאה תחתונה/שמאלית, max לעליונה/ימנית
+  (if use-min (min a b) (max a b)))
+
+(defun cu:collect-runs (rects xs ys nx ny is-h is-lo / i m lvl runs cur-lvl cur-0 c0 c1)
+  ; אוסף ריצות של רמה קבועה לאורך הפאה. מחזיר רשימת (coord0 coord1 level).
+  ; is-h=T → פאה אופקית (רץ על עמודות x); is-lo=T → תחתונה/שמאלית.
+  (setq m (if is-h nx ny) runs nil cur-lvl nil cur-0 nil i 0)
+  (while (< i (1- m))
+    (setq lvl (if is-h (cu:col-level rects xs ys ny i is-lo)
+                       (cu:row-level rects xs ys nx i is-lo))
+          c0  (nth i (if is-h xs ys)))
+    (if (not (and cur-lvl lvl (equal lvl cur-lvl 1e-6)))
+      (progn
+        (if cur-lvl (setq runs (cons (list cur-0 c0 cur-lvl) runs)))
+        (if lvl (setq cur-lvl lvl cur-0 c0) (setq cur-lvl nil cur-0 nil))))
+    (setq i (1+ i)))
+  (if cur-lvl (setq runs (cons (list cur-0 (nth (1- m) (if is-h xs ys)) cur-lvl) runs)))
+  (reverse runs))
+
+(defun cu:dim-hchain (rects xs ys nx ny bb dim-off is-bottom / refy runs n k r rl rr)
+  ; שרשרת אופקית: כל שבירה (משותפת לשתי מדרגות) משתמשת ברמה הקרובה לקו המידה
+  (setq refy (if is-bottom (- (cadr bb) dim-off) (+ (cadddr bb) dim-off))
+        runs (cu:collect-runs rects xs ys nx ny T is-bottom)
+        n (length runs) k 0)
+  (while (< k n)
+    (setq r  (nth k runs)
+          rl (if (and (> k 0) (equal (car r) (cadr (nth (1- k) runs)) 1e-6))
+               (cu:closer (caddr (nth (1- k) runs)) (caddr r) is-bottom) (caddr r))
+          rr (if (and (< k (1- n)) (equal (cadr r) (car (nth (1+ k) runs)) 1e-6))
+               (cu:closer (caddr (nth (1+ k) runs)) (caddr r) is-bottom) (caddr r)))
+    (command "_.DIMLINEAR" (list (car r) rl) (list (cadr r) rr)
+      (list (* 0.5 (+ (car r) (cadr r))) refy))
+    (setq k (1+ k))))
+
+(defun cu:dim-vchain (rects xs ys nx ny bb dim-off is-left / refx runs n k r rl rr)
+  ; שרשרת אנכית: כל שבירה משתמשת ברמה (x) הקרובה לקו המידה
+  (setq refx (if is-left (- (car bb) dim-off) (+ (caddr bb) dim-off))
+        runs (cu:collect-runs rects xs ys nx ny nil is-left)
+        n (length runs) k 0)
+  (while (< k n)
+    (setq r  (nth k runs)
+          rl (if (and (> k 0) (equal (car r) (cadr (nth (1- k) runs)) 1e-6))
+               (cu:closer (caddr (nth (1- k) runs)) (caddr r) is-left) (caddr r))
+          rr (if (and (< k (1- n)) (equal (cadr r) (car (nth (1+ k) runs)) 1e-6))
+               (cu:closer (caddr (nth (1+ k) runs)) (caddr r) is-left) (caddr r)))
+    (command "_.DIMLINEAR" (list rl (car r)) (list rr (cadr r))
+      (list refx (* 0.5 (+ (car r) (cadr r)))))
+    (setq k (1+ k))))
+
+(defun cu:dimensions (rects bb dim-off / xs ys nx ny r)
+  ; מידה על 4 הפאות; כל פאה נשברת לפי מדרגות הפרופיל של הקו שלה בלבד.
+  (setq xs nil ys nil)
+  (foreach r rects
+    (setq xs (cons (car r) (cons (caddr r) xs))
+          ys (cons (cadr r) (cons (cadddr r) ys))))
+  (setq xs (cu:sort-uniq xs) ys (cu:sort-uniq ys)
+        nx (length xs) ny (length ys))
+  (cu:dim-hchain rects xs ys nx ny bb dim-off T)     ; פאה תחתונה
+  (cu:dim-hchain rects xs ys nx ny bb dim-off nil)   ; פאה עליונה
+  (cu:dim-vchain rects xs ys nx ny bb dim-off T)     ; פאה שמאלית
+  (cu:dim-vchain rects xs ys nx ny bb dim-off nil)   ; פאה ימנית
+  (princ))
+
+;;; ============================================================
 ;;; M. הפקודה הראשית — C:COLDET
 ;;; ============================================================
 
@@ -1635,12 +2128,17 @@
                    bar-d1 bar-d2
                    prev-dimscale dim-off dim-prev-lay
                    prev-osmode
-                   ent-before blk-ss blk-e blk-name blk-base ins-pt
+                   ent-before blk-ss blk-e blk-name blk-base ins-pt ins-ent
                    dlg-start ldir start-code cfg-saved shape-kw
                    ch-dec ch-bb ch-rects rc
                    ch-beam ch-lA ch-lB ch-bcen ch-ov1 ch-ov2
                    ch-r1 ch-r2 ch-aof ch-arx ch-aif ch-bof ch-brx ch-bif
-                   ch-mark ch-ext ch-maxx ch-maxy ch-sgap ch-sdx ch-sbb srect)
+                   ch-mark ch-ext ch-maxx ch-maxy ch-sgap ch-sdx ch-sbb srect
+                   cir-cen cir-r cir-ir cir-rr cir-gap cir-n cir-i cir-ang cir-pt
+                   cir-int-ent c-bb c-ext cl-e1 cl-e2
+                   sp-vals sp-type sp-diam sp-spac sp-fields sp-th sp-touch sp-conn
+                   cu-rects cu-more cu-p1 cu-p2 cu-ans cu-bb cu-loops lp
+                   cu-mark cu-ext cu-maxx cu-maxy cu-sx cu-w cu-h cu-sbb cu-stir-vals)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -1683,15 +2181,16 @@
        (setq cfg (cdt:settings-dialog cfg)))
 
      ;; בחירת סוג צורה ידנית — לפני בחירת הפוליגון
-     (initget "REC L T Z U CIR")
-     (setq shape-kw (getkword "\nShape type [REC/L/T/Z/U/CIR] <REC>: "))
+     (initget "REC L T Z U CIR CUSTOM")
+     (setq shape-kw (getkword "\nShape type [REC/L/T/Z/U/CIR/CUSTOM] <REC>: "))
      (if (null shape-kw) (setq shape-kw "REC"))   ; Enter = ריבוע
      (setq shape (cond ((= shape-kw "REC") "rect")
                        ((= shape-kw "L")   "lshape")
                        ((= shape-kw "T")   "tshape")
                        ((= shape-kw "Z")   "zshape")
                        ((= shape-kw "U")   "chet")
-                       ((= shape-kw "CIR") "circle")))
+                       ((= shape-kw "CIR") "circle")
+                       ((= shape-kw "CUSTOM") "custom")))
      (cdt:log (strcat "[L01] shape=" shape " (kw=" shape-kw ")"))
 
      ;; צורות שעדיין לא מומשו — הודעה מסודרת ויציאה נקייה
@@ -1740,12 +2239,13 @@
              (cdt:ensure-layer (cdt:get cfg "dim-layer"))
              (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
              (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
-             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (if (and (cdt:get cfg "dim-style")
                       (not (equal (cdt:get cfg "dim-style") "")))
                (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
                  (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
                  (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             ;; אחרי שחזור הסגנון — קנה המידה מההגדרות גובר (אחרת הסגנון דורס אותו)
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (command "_.DIMLINEAR"
                (list (car bb-ext)   (cadr bb-ext))
                (list (caddr bb-ext) (cadr bb-ext))
@@ -1818,8 +2318,152 @@
          ;; ─── מסלול עיגול ──────────────────────────────────────
          (if (= shape "circle")
            (progn
-             (princ "\n[Circle - not yet implemented]")
-             (setq top-y 0  cx 0)))
+             (cdt:log "[L60] circle-path")
+             ;; אימות — רשת ביטחון; המשתמש כבר הצהיר "עיגול"
+             (if (/= (cdr (assoc 0 (entget ename))) "CIRCLE")
+               (progn (setvar "OSMODE" prev-osmode)
+                      (princ "\nError: selected entity is not a CIRCLE.") (exit)))
+             (setq cir-cen (cdr (assoc 10 (entget ename)))
+                   cir-cen (list (car cir-cen) (cadr cir-cen))   ; x,y בלבד
+                   cir-r   (cdr (assoc 40 (entget ename)))
+                   cir-ir  (- cir-r offset)                      ; רדיוס פנימי (כיסוי)
+                   cir-gap (* 1.2 donut-size)
+                   cir-rr  (- cir-ir cir-gap)                    ; רדיוס מעגל הזיון
+                   c-bb    (list (- (car cir-cen) cir-r) (- (cadr cir-cen) cir-r)
+                                 (+ (car cir-cen) cir-r) (+ (cadr cir-cen) cir-r))
+                   ch-mark (entlast))   ; סמן לפני ציור — למדידת גבול אמיתי
+
+             ;; איפוס סוג-קו וקנה-מידה נוכחיים — מונע "דליפת" CENTER מריצה קודמת
+             ;; לישויות הבאות (מידות, גיאומטריה פנימית)
+             (setvar "CELTYPE"   "BYLAYER")
+             (setvar "CELTSCALE" 1.0)
+
+             ;; גיאומטריה חיצונית — העתק הישות
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
+             (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
+             (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
+             (setvar "CECOLOR" "256")
+             ;; שני קווי ציר (+) — אורך 1.4× הקוטר (20% מעבר לכל כיוון).
+             ;; סוג CENTER ו-LTScale 1 נקבעים ישירות על הישות (cdt:set-center-lt),
+             ;; בלי לגעת ב-CELTYPE הגלובלי → אין דליפה למידות/לגיאומטריה הפנימית.
+             ;; צבע ושכבה — כמו הלידרים.
+             (cdt:ensure-linetype "CENTER")
+             (command "_.COLOR" (cdt:color-str (cdt:get cfg "leader-color")))
+             (setq cl-e1 (cdt:draw-line
+                           (list (- (car cir-cen) (* 1.4 cir-r)) (cadr cir-cen))
+                           (list (+ (car cir-cen) (* 1.4 cir-r)) (cadr cir-cen))
+                           (cdt:get cfg "leader-layer"))
+                   cl-e2 (cdt:draw-line
+                           (list (car cir-cen) (- (cadr cir-cen) (* 1.4 cir-r)))
+                           (list (car cir-cen) (+ (cadr cir-cen) (* 1.4 cir-r)))
+                           (cdt:get cfg "leader-layer")))
+             (command "_.COLOR" "BYLAYER")
+             (cdt:set-center-lt cl-e1)
+             (cdt:set-center-lt cl-e2)
+
+             ;; ── מידה חיצונית — קו מידה רגיל (קוטר), מתחת
+             (cdt:log "[L60b] circle-dim-ext")
+             (setq prev-dimscale (getvar "DIMSCALE")
+                   dim-prev-lay  (getvar "CLAYER")
+                   dim-off       CDT:DIM-OFFSET)
+             (cdt:ensure-layer (cdt:get cfg "dim-layer"))
+             (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
+             (if (and (cdt:get cfg "dim-style")
+                      (not (equal (cdt:get cfg "dim-style") "")))
+               (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
+                 (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
+                 (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             ;; אחרי שחזור הסגנון — קנה המידה מההגדרות גובר (אחרת הסגנון דורס אותו)
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (command "_.DIMLINEAR"
+               (list (- (car cir-cen) cir-r) (cadr cir-cen))
+               (list (+ (car cir-cen) cir-r) (cadr cir-cen))
+               (list (car cir-cen) (- (cadr cir-cen) cir-r dim-off 4.0)))
+             (setvar "CLAYER"   dim-prev-lay)
+             (setvar "CECOLOR"  "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
+             ;; גיאומטריה פנימית
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
+             (setq cir-int-ent (cdt:draw-circle cir-cen cir-ir (cdt:get cfg "int-layer")))
+             (setvar "CECOLOR" "256")
+
+             ;; ── מידה פנימית — קו מידה רגיל, בצד מנגד (מעל)
+             (cdt:log "[L60c] circle-dim-int")
+             (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (command "_.DIMLINEAR"
+               (list (- (car cir-cen) cir-ir) (cadr cir-cen))
+               (list (+ (car cir-cen) cir-ir) (cadr cir-cen))
+               (list (car cir-cen) (+ (cadr cir-cen) cir-r dim-off)))
+             (setvar "CLAYER"   dim-prev-lay)
+             (setvar "CECOLOR"  "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
+             ;; ── דונאטים — מספר אוטומטי לפי מרווח, אחיד על מעגל הזיון
+             (cdt:log "[L61] circle-donuts")
+             (setq cir-n (cdt:ceiling-int (/ (* 2.0 pi cir-rr) CDT:MAX-SPACING)))
+             (if (< cir-n 6) (setq cir-n 6))
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
+             (setq placed nil  cir-i 0)
+             (while (< cir-i cir-n)
+               (setq cir-ang (+ (* 0.5 pi) (/ (* 2.0 pi cir-i) cir-n))   ; התחלה למעלה
+                     cir-pt  (polar cir-cen cir-ang cir-rr)
+                     placed  (cdt:donut-if-new cir-pt donut-size donut-layer placed)
+                     cir-i   (1+ cir-i)))
+             (setvar "CECOLOR" "256")
+             (cdt:log (strcat "[L62] circle-donuts-done placed=" (itoa (length placed))))
+
+             ;; ── גבול אמיתי של מה שצויר (כולל מידות)
+             (setq c-ext   (cdt:ents-bbox-max ch-mark)
+                   ch-maxx (car  c-ext)
+                   ch-maxy (cadr c-ext))
+             (if (null ch-maxx) (setq ch-maxx (caddr  c-bb)))
+             (if (null ch-maxy) (setq ch-maxy (cadddr c-bb)))
+
+             ;; גובה טקסט הבלוקים; שני הבלוקים בגובה המרכז כדי שהלידרים לא יחצו
+             ;; את המידה התחתונה. הקו ב-cy+4 → תחתית הטקסט ~5 יח' מעל המרכז.
+             (setq sp-th (atof (cdt:get cfg "donut-txt-height"))
+                   sp-th (if (> sp-th 0.0) sp-th 2.5)
+                   bar-conn-pt (list (+ (caddr c-bb) (* 1.5 sp-th))
+                                     (+ (cadr cir-cen) 4.0)))
+
+             ;; ── חישוק = ספירלה: לידר נוגע במעגל הפנימי + קו תחתון + טקסט מ-BARS,
+             ;;    בתמונת מראה לבלוק הדונאטים (פונים זה לזה, בלי הצטלבות לידרים)
+             (cdt:log "[L63] circle-spiral")
+             (if *cdt-bars-ok*
+               (progn
+                 (setq sp-vals (cdt:spiral-dialog))
+                 (if sp-vals
+                   (progn
+                     (setq sp-type (nth 0 sp-vals)   ; סוג / קוטר / פסיעה (בלי כמות)
+                           sp-diam (nth 1 sp-vals)
+                           sp-spac (nth 2 sp-vals)
+                           ;; שדות BARS: f1=קידומת "ספירלה" (אותיות הפוכות בגלל RTL),
+                           ;; f2=כמות כבויה, f3=סוג, f4=קוטר, f5=@, f6=פסיעה, השאר כבוי
+                           sp-fields (list "הלריפס" "0" sp-type sp-diam
+                                           (if (and sp-spac (not (equal sp-spac ""))
+                                                    (not (equal sp-spac "0"))) "1" "0")
+                                           (if sp-spac sp-spac "0")
+                                           "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0")
+                           ;; נקודת מגע שמאל-מעלה — מעל מפגש קו-הציר עם המעגל הפנימי (לא מבלבל)
+                           sp-touch (polar cir-cen (* 0.8 pi) cir-ir)
+                           ;; מראה של נקודת חיבור בלוק הדונאטים סביב ציר ה-X, מורמת מעט למעלה
+                           sp-conn  (list (- (* 2.0 (car cir-cen)) (car bar-conn-pt))
+                                          (+ (cadr bar-conn-pt) (* 3.0 sp-th))))
+                     (cdt:draw-spiral-block sp-touch sp-conn -1 sp-fields
+                       (cdt:get cfg "leader-layer") (cdt:get cfg "leader-color")
+                       (cdt:get cfg "donut-txt-style") sp-th (cdt:get cfg "donut-txt-color"))))))
+
+             ;; עוגנים — בלוק המוטות מימין: פורק משני הדונאטים הימניים (עליון+תחתון)
+             (setq bar-d1 (car (cdt:closest-and-farthest-donut placed
+                                 (list (caddr c-bb) (cadddr c-bb))))   ; ימין-עליון
+                   bar-d2 (car (cdt:closest-and-farthest-donut placed
+                                 (list (caddr c-bb) (cadr c-bb))))     ; ימין-תחתון
+                   top-y  (+ ch-maxy 10.0)
+                   cx     (car cir-cen))))
 
          ;; ─── מסלול צורת ר ─────────────────────────────────────
          (if (= shape "lshape")
@@ -1866,12 +2510,13 @@
              (cdt:ensure-layer (cdt:get cfg "dim-layer"))
              (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
              (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
-             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (if (and (cdt:get cfg "dim-style")
                       (not (equal (cdt:get cfg "dim-style") "")))
                (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
                  (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
                  (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             ;; אחרי שחזור הסגנון — קנה המידה מההגדרות גובר (אחרת הסגנון דורס אותו)
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              ;; מחרוזות מידות — תמיד בצד המגרעת
              ;; מחרוזת אופקית (2 קווים על הצלע האופקית של המגרעת)
              (setq h-yref (if notch-top ls-y1 ls-y0)
@@ -2061,12 +2706,13 @@
              (cdt:ensure-layer (cdt:get cfg "dim-layer"))
              (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
              (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
-             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (if (and (cdt:get cfg "dim-style")
                       (not (equal (cdt:get cfg "dim-style") "")))
                (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
                  (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
                  (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             ;; אחרי שחזור הסגנון — קנה המידה מההגדרות גובר (אחרת הסגנון דורס אותו)
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (cdt:chet-dimensions ch-rects ch-bb CDT:DIM-OFFSET)
              (setvar "CLAYER"   dim-prev-lay)
              (setvar "CECOLOR"  "256")
@@ -2165,12 +2811,13 @@
              (cdt:ensure-layer (cdt:get cfg "dim-layer"))
              (setvar "CLAYER"   (cdt:get cfg "dim-layer"))
              (setvar "CECOLOR"  (cdt:color-str (cdt:get cfg "dim-color")))
-             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (if (and (cdt:get cfg "dim-style")
                       (not (equal (cdt:get cfg "dim-style") "")))
                (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
                  (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
                  (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             ;; אחרי שחזור הסגנון — קנה המידה מההגדרות גובר (אחרת הסגנון דורס אותו)
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
              (cdt:zshape-dimensions ch-rects ch-bb CDT:DIM-OFFSET)
              (setvar "CLAYER"   dim-prev-lay)
              (setvar "CECOLOR"  "256")
@@ -2266,6 +2913,122 @@
                    top-y       (+ ch-maxy 10.0)
                    cx          (* 0.5 (+ (car ch-bb) (caddr ch-bb))))))
 
+         ;; ─── מסלול "קוסטום" — עמוד מורכב לפי מלבנים שהמשתמש מסמן ──
+         (if (= shape "custom")
+           (progn
+             (cdt:log "[L70] custom-path")
+             (setq cu-mark (entlast))   ; סמן לפני כל ציור — למדידת גבול אמיתי
+
+             ;; ── לולאת סימון מלבנים — מדליק את כל הצמדות ה-OSNAP לנוחות הצבעה
+             ;; (15359 = כל התיבות מסומנות: קצה/אמצע/מרכז/צומת/רבע/חיתוך/הארכה/
+             ;;  הכנסה/ניצב/משיק/קרוב/חיתוך-מדומה/מקביל). בסוף הפקודה משוחזר prev-osmode.
+             (setvar "OSMODE" 15359)
+             (setq cu-rects nil  cu-more T)
+             (while cu-more
+               (setq cu-p1 (getpoint "\nMark rectangle - first corner (Enter to finish): "))
+               (if (null cu-p1)
+                 (setq cu-more nil)
+                 (progn
+                   (setq cu-p2 (getcorner cu-p1 "\nOpposite corner: "))
+                   (if (null cu-p2)
+                     (setq cu-more nil)
+                     (progn
+                       (setq cu-rects (cons (cdt:bbox-from-verts (list cu-p1 cu-p2)) cu-rects))
+                       (initget "Yes No")
+                       (setq cu-ans (getkword "\nAnother rectangle? [Yes/No] <Yes>: "))
+                       (if (= cu-ans "No") (setq cu-more nil)))))))
+             (setvar "OSMODE" 0)
+             (setq cu-rects (reverse cu-rects))
+
+             (if (null cu-rects)
+               (progn (setvar "OSMODE" prev-osmode)
+                      (princ "\nNo rectangles marked - aborting.") (exit)))
+
+             ;; ── מתאר האיחוד + תיבה תוחמת כוללת ──
+             (setq cu-loops (mapcar 'cu:ccw (cu:trace-loops (cu:union-segs cu-rects)))
+                   cu-bb    (cdt:bbox-from-verts
+                              (apply 'append
+                                (mapcar '(lambda (r)
+                                           (list (list (car r)   (cadr r))
+                                                 (list (caddr r) (cadddr r)))) cu-rects))))
+             (cdt:log (strcat "[L71] custom loops=" (itoa (length cu-loops))))
+
+             ;; ── גיאומטריה חיצונית = העתק מדויק של המתאר שנבחר ──
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "ext-color")))
+             (command "_.COPY" (ssadd ename (ssadd)) "" '(0 0 0) '(0 0 0))
+             (cdt:set-layer (entlast) (cdt:get cfg "ext-layer"))
+             (setvar "CECOLOR" "256")
+
+             ;; ── קווי מידה (לפי מתאר האיחוד, כולל נקודות חיתוך) ──
+             (cdt:log "[L71b] custom-dims")
+             (setq prev-dimscale (getvar "DIMSCALE")  dim-prev-lay (getvar "CLAYER"))
+             (cdt:ensure-layer (cdt:get cfg "dim-layer"))
+             (setvar "CLAYER"  (cdt:get cfg "dim-layer"))
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "dim-color")))
+             (if (and (cdt:get cfg "dim-style") (not (equal (cdt:get cfg "dim-style") "")))
+               (if (tblsearch "DIMSTYLE" (cdt:get cfg "dim-style"))
+                 (command "_.DIMSTYLE" "R" (cdt:get cfg "dim-style") "")
+                 (princ (strcat "\nWarning: dim-style '" (cdt:get cfg "dim-style") "' not found."))))
+             (setvar "DIMSCALE" (atof (cdt:get cfg "dim-scale")))
+             (cu:dimensions cu-rects cu-bb CDT:DIM-OFFSET)
+             (setvar "CLAYER"  dim-prev-lay)
+             (setvar "CECOLOR" "256")
+             (setvar "DIMSCALE" prev-dimscale)
+
+             ;; ── חישוקים בתוך הצורה — כל מלבן מוקטן באופסט, מצויר במקומו (התא בפועל) ──
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
+             (foreach rc cu-rects
+               (cdt:draw-closed-rect (cdt:bbox-inset rc offset) (cdt:get cfg "int-layer")))
+             (setvar "CECOLOR" "256")
+
+             ;; ── דונאטים — לכל תא, על צלעות חיצוניות בלבד (מיושר עם התאים, בלי כפילויות) ──
+             (cdt:log "[L72] custom-donuts")
+             (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
+             (setq placed (cu:tie-donuts cu-rects donut-size offset donut-layer nil))
+             (setvar "CECOLOR" "256")
+             (cdt:log (strcat "[L73] custom-donuts-done placed=" (itoa (length placed))))
+
+             ;; ── גבול אמיתי של מה שצויר (כולל מידות) ──
+             (setq cu-ext  (cdt:ents-bbox-max cu-mark)
+                   cu-maxx (car cu-ext)  cu-maxy (cadr cu-ext))
+             (if (null cu-maxx) (setq cu-maxx (caddr  cu-bb)))
+             (if (null cu-maxy) (setq cu-maxy (cadddr cu-bb)))
+
+             ;; ── חישוקים סמליים — נפרד לכל מלבן, מסודרים בשורה אחד ליד השני ──
+             ;; הדיאלוג נפתח פעם אחת בלבד; L= מחושב מחדש פר-מלבן בציור התווית
+             (cdt:log "[L74] custom-stirrups")
+             (setq cu-stir-vals
+               (if *cdt-bars-ok*
+                 (bars:stirrup-dialog (cdt:bbox-inset (car cu-rects) offset))))
+             (setq cu-sx (+ cu-maxx 30.0))
+             (foreach rc cu-rects
+               (setq bb-int (cdt:bbox-inset rc offset)
+                     cu-w   (cdt:bbox-width  bb-int)
+                     cu-h   (cdt:bbox-height bb-int)
+                     cu-sbb (list cu-sx (cadr cu-bb)
+                                  (+ cu-sx cu-w) (+ (cadr cu-bb) cu-h)))
+               (cdt:draw-stirrup-rect cu-sbb (cdt:get cfg "stirrup-layer")
+                 (cdt:get cfg "stirrup-style")
+                 (atof (cdt:get cfg "stirrup-height"))
+                 (cdt:get cfg "stirrup-color")
+                 (cdt:get cfg "stirrup-txt-color"))
+               (if (and *cdt-bars-ok* cu-stir-vals)
+                 (bars:draw-stirrup-label cu-sbb cu-stir-vals
+                   (cdt:get cfg "stirrup-layer")
+                   (cdt:get cfg "stirrup-style")
+                   (atof (cdt:get cfg "stirrup-height"))
+                   (cdt:get cfg "stirrup-txt-color")))
+               (setq cu-sx (+ cu-sx cu-w 25.0)))
+
+             ;; ── עוגנים לבלוק המוטות + כותרת ──
+             (setq bar-conn-pt (cdt:bar-block-conn-pt cu-bb cfg)
+                   bar-d1 (car (cdt:closest-and-farthest-donut placed
+                                 (list (car  cu-bb) (cadr cu-bb))))
+                   bar-d2 (car (cdt:closest-and-farthest-donut placed
+                                 (list (caddr cu-bb) (cadr cu-bb))))
+                   top-y  (+ cu-maxy 10.0)
+                   cx     (* 0.5 (+ (car cu-bb) (caddr cu-bb))))))
+
          ;; ─── בלוק מוטות ──────────────────────────────────────────
          (cdt:log "[L30] before bar-popup")
          (if placed
@@ -2335,6 +3098,8 @@
                  (bb-ext      (list (car bb-ext)      (cadr bb-ext)))
                  (ls-overall  (list (car ls-overall)  (cadr ls-overall)))
                  (ch-bb       (list (car ch-bb)       (cadr ch-bb)))
+                 (c-bb        (list (car c-bb)        (cadr c-bb)))
+                 (cu-bb       (list (car cu-bb)       (cadr cu-bb)))
                  (t           '(0.0 0.0))))
 
              ;; יצירת הגדרת בלוק — מסיר אובייקטים ומגדיר בלוק
@@ -2344,7 +3109,11 @@
 
              ;; הנחת הבלוק — PAUSE: הבלוק עוקב אחרי הסמן עד לחיצה
              (princ "\nPlace block (pick insertion point): ")
-             (command "_.INSERT" blk-name PAUSE 1 1 0)))
+             (command "_.INSERT" blk-name PAUSE 1 1 0)
+             ;; פיצוץ אוטומטי — מחזיר לישויות בודדות (רק אם אכן נוצר בלוק)
+             (setq ins-ent (entlast))
+             (if (and ins-ent (= (cdr (assoc 0 (entget ins-ent))) "INSERT"))
+               (command "_.EXPLODE" ins-ent))))
 
          ;; שחזור OSNAP
          (setvar "OSMODE" prev-osmode)
@@ -2352,6 +3121,9 @@
          (princ "\nCOLDET complete.")))))
 
   (princ))
+
+;; חיבור לסרגל המשותף (toolbar hub). אם ה-hub לא טעון — מדלג בשקט.
+(if tb:add-button (tb:add-button "COLDET" "^C^CCOLDET " "col"))
 
 ;;; ─── הודעת טעינה ─────────────────────────────────────────────
 (princ "\nCOLDET 1.1 loaded. Run: COLDET\n")
