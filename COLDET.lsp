@@ -3077,10 +3077,11 @@
                  (list (car ch-lA) (cadr ch-bb) (caddr ch-lA) (cadddr ch-bb))     ; לכל הגובה
                  (list (car ch-bb) (cadr ch-lA) (caddr ch-bb) (cadddr ch-lA))))   ; לכל הרוחב
              (setq t-flange-in (cdt:bbox-inset ch-beam     offset)
-                   t-stem-in   (cdt:bbox-inset t-stem-full offset))
+                   t-stem-in   (cdt:bbox-inset t-stem-full offset)   ; מוארכת — לחפיפה/דונאטים בלבד, לא מצוירת
+                   ch-lA       (cdt:bbox-inset ch-lA        offset)) ; הרגל האמיתית (הקצרה) — זו שמצוירת, תואמת לחישוק
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
              (cdt:draw-closed-rect t-flange-in (cdt:get cfg "int-layer"))
-             (cdt:draw-closed-rect t-stem-in   (cdt:get cfg "int-layer"))
+             (cdt:draw-closed-rect ch-lA       (cdt:get cfg "int-layer"))
              (setvar "CECOLOR" "256")
 
              ;; ── דונאטים — 4 אזורים: חפיפה, 2 אוזני הכנף, השלמת הרגל (כמו ר': חפיפה+2 זרועות) ──
@@ -3193,8 +3194,8 @@
              ;; ── חישוקים — 2 מלבנים (כנף+רגל), לפי המידות הפנימיות (קו הכיסוי) כמו בכל שאר הצורות
              (cdt:log "[L64] tshape-stirrups")
              (setq ch-sgap 30.0
-                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb))
-                   ch-lA   (cdt:bbox-inset ch-lA offset))   ; הרגל האמיתית (לא המוארכת) — מוקטנת כמו הכנף
+                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+             ;; ch-lA כבר הוקטן (הרגל האמיתית, לא המוארכת) בשלב הגיאומטריה הפנימית למעלה
              ;; BARS — דיאלוג חישוקים פעם אחת (2 מלבנים), ואז תווית לכל אחד
              (setq ch-stir-vals (cdt:stirrup-dialog-safe t-flange-in))
              (foreach srect (list t-flange-in ch-lA)
