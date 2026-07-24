@@ -2254,7 +2254,7 @@
                    t-ov t-ov-inset t-ov-cen t-ov-bl t-ov-br t-ov-tr t-ov-tl
                    t-e1 t-e1-inset t-e1-cen t-e1-p1 t-e1-p2
                    t-e2 t-e2-inset t-e2-cen t-e2-p1 t-e2-p2
-                   t-ext t-ext-inset t-ext-cen t-ext-p1 t-ext-p2 t-anch1 t-anch2)
+                   t-ext t-ext-inset t-ext-cen t-ext-p1 t-ext-p2 t-anch1 t-anch2 t-stir-x)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -3077,11 +3077,10 @@
                  (list (car ch-lA) (cadr ch-bb) (caddr ch-lA) (cadddr ch-bb))     ; לכל הגובה
                  (list (car ch-bb) (cadr ch-lA) (caddr ch-bb) (cadddr ch-lA))))   ; לכל הרוחב
              (setq t-flange-in (cdt:bbox-inset ch-beam     offset)
-                   t-stem-in   (cdt:bbox-inset t-stem-full offset)   ; מוארכת — לחפיפה/דונאטים בלבד, לא מצוירת
-                   ch-lA       (cdt:bbox-inset ch-lA        offset)) ; הרגל האמיתית (הקצרה) — זו שמצוירת, תואמת לחישוק
+                   t-stem-in   (cdt:bbox-inset t-stem-full offset))  ; מוארכת — זו שמצוירת (עקבי עם ר'/ח')
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
              (cdt:draw-closed-rect t-flange-in (cdt:get cfg "int-layer"))
-             (cdt:draw-closed-rect ch-lA       (cdt:get cfg "int-layer"))
+             (cdt:draw-closed-rect t-stem-in   (cdt:get cfg "int-layer"))
              (setvar "CECOLOR" "256")
 
              ;; ── דונאטים — 4 אזורים: חפיפה, 2 אוזני הכנף, השלמת הרגל (כמו ר': חפיפה+2 זרועות) ──
@@ -3191,16 +3190,17 @@
              (if (null ch-maxx) (setq ch-maxx (caddr  ch-bb)))
              (if (null ch-maxy) (setq ch-maxy (cadddr ch-bb)))
 
-             ;; ── חישוקים — 2 מלבנים (כנף+רגל), לפי המידות הפנימיות (קו הכיסוי) כמו בכל שאר הצורות
+             ;; ── חישוקים — 2 מלבנים (כנף+רגל), בשורה אחד ליד השני עם רווח (כמו קוסטום) —
+             ;; לא ביחס-מיקום משותף (כמו ח'): הרגל המוארכת רחבה כמו הכנף בטווח ה-X, אז שיטת ח' הייתה מקרבת/מקננת אותם
              (cdt:log "[L64] tshape-stirrups")
-             (setq ch-sgap 30.0
-                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
-             ;; ch-lA כבר הוקטן (הרגל האמיתית, לא המוארכת) בשלב הגיאומטריה הפנימית למעלה
+             (setq ch-sgap  30.0
+                   t-stir-x (+ ch-maxx ch-sgap))
              ;; BARS — דיאלוג חישוקים פעם אחת (2 מלבנים), ואז תווית לכל אחד
              (setq ch-stir-vals (cdt:stirrup-dialog-safe t-flange-in))
-             (foreach srect (list t-flange-in ch-lA)
-               (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
-                                  (+ (caddr srect) ch-sdx) (cadddr srect)))
+             (foreach srect (list t-flange-in t-stem-in)
+               (setq ch-sbb (list t-stir-x (cadr srect)
+                                  (+ t-stir-x (cdt:bbox-width srect)) (cadddr srect))
+                     t-stir-x (+ t-stir-x (cdt:bbox-width srect) 25.0))
                (cdt:draw-stirrup-rect ch-sbb (cdt:get cfg "stirrup-layer")
                  (cdt:get cfg "stirrup-style")
                  (atof (cdt:get cfg "stirrup-height"))
