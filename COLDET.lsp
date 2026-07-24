@@ -3190,13 +3190,14 @@
              (if (null ch-maxx) (setq ch-maxx (caddr  ch-bb)))
              (if (null ch-maxy) (setq ch-maxy (cadddr ch-bb)))
 
-             ;; ── חישוקים — 2 מלבנים (כנף+רגל), מימין ורחוק מהמידות
+             ;; ── חישוקים — 2 מלבנים (כנף+רגל), לפי המידות הפנימיות (קו הכיסוי) כמו בכל שאר הצורות
              (cdt:log "[L64] tshape-stirrups")
              (setq ch-sgap 30.0
-                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb)))
+                   ch-sdx  (- (+ ch-maxx ch-sgap) (car ch-bb))
+                   ch-lA   (cdt:bbox-inset ch-lA offset))   ; הרגל האמיתית (לא המוארכת) — מוקטנת כמו הכנף
              ;; BARS — דיאלוג חישוקים פעם אחת (2 מלבנים), ואז תווית לכל אחד
-             (setq ch-stir-vals (cdt:stirrup-dialog-safe ch-beam))
-             (foreach srect (list ch-beam ch-lA)
+             (setq ch-stir-vals (cdt:stirrup-dialog-safe t-flange-in))
+             (foreach srect (list t-flange-in ch-lA)
                (setq ch-sbb (list (+ (car   srect) ch-sdx) (cadr   srect)
                                   (+ (caddr srect) ch-sdx) (cadddr srect)))
                (cdt:draw-stirrup-rect ch-sbb (cdt:get cfg "stirrup-layer")
