@@ -2250,7 +2250,7 @@
                    sp-vals sp-type sp-diam sp-spac sp-fields sp-th sp-touch sp-conn
                    cu-rects cu-more cu-p1 cu-p2 cu-ans cu-bb cu-loops lp
                    cu-mark cu-ext cu-maxx cu-maxy cu-sx cu-w cu-h cu-sbb cu-stir-vals
-                   t-outline t-inset)
+                   t-outline t-inset t-donut-poly)
   (vl-load-com)
   (cdt:log-clear)
   (cdt:log (strcat "COLDET start [v-bar-color] sint=" (if cdt-sint "OK" "NIL")))
@@ -3066,16 +3066,19 @@
 
              ;; ── גיאומטריה פנימית — מתאר שלם (כנף+רגל) מוזח פנימה כמקשה אחת (כמו קוסטום)
              (cdt:log "[L61] tshape-inner")
+             (cdt:log (strcat "[L61a] flange=" (vl-princ-to-string ch-beam) " stem=" (vl-princ-to-string ch-lA)))
              (setq t-outline (car (cu:trace-loops (cu:union-segs (list ch-beam ch-lA))))
                    t-inset   (cu:inset-poly t-outline offset))
+             (cdt:log (strcat "[L61b] t-outline=" (vl-princ-to-string t-outline)))
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "int-color")))
              (cu:draw-poly t-inset (cdt:get cfg "int-layer"))
              (setvar "CECOLOR" "256")
 
-             ;; ── דונאטים — פינה + מילוי לאורך כל צלע של המתאר הפנימי (כולל הפינה הקעורה)
+             ;; ── דונאטים — הזחה נוספת מהקו הפנימי (0.8×גודל, כמו בכל שאר הצורות)
              (cdt:log "[L62] tshape-donuts")
              (setvar "CECOLOR" (cdt:color-str (cdt:get cfg "donut-color")))
-             (setq placed (cu:poly-donuts t-inset donut-size donut-layer nil))
+             (setq t-donut-poly (cu:inset-poly t-outline (+ offset (* 0.8 donut-size)))
+                   placed (cu:poly-donuts t-donut-poly donut-size donut-layer nil))
              (setvar "CECOLOR" "256")
              (cdt:log (strcat "[L63] tshape-donuts-done placed=" (itoa (length placed))))
 
