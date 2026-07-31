@@ -1,4 +1,14 @@
 ﻿;;; ============================================================
+;;; acad:strp — תחליף נייד ל-STRINGP
+;;; ============================================================
+;;; STRINGP היא הרחבה של ZWCAD ואינה קיימת באף גרסת AutoCAD.
+;;; TYPE היא פרימיטיב אוניברסלי ועובדת בשתי הפלטפורמות.
+;;; ההגדרה חוזרת בכל קובץ תוסף בכוונה — כדי שכל קובץ ייטען גם לבד
+;;; ((load "...") לבדיקות), בלי תלות ב-acaddoc.lsp. הגדרה חוזרת בטוחה.
+;;; ⚠️ אסור לבדוק קיום פונקציה ע"י קריאה לה — vl-catch-all-apply אינה
+;;; תופסת "פונקציה לא מוגדרת" וזורקת bad function שמפיל את כל הקובץ.
+(defun acad:strp ( x ) (equal (type x) 'STR))
+;;; ============================================================
 ;;; COLDET.lsp — Column Detail Generator for ZCAD / AutoCAD
 ;;; Version 1.1 — DCL settings dialog
 ;;; ============================================================
@@ -14,23 +24,23 @@
        (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\coldet"))
      (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\coldet"))
     ; גיבוי: findfile — רק אם מחזיר מחרוזת
-    ((stringp (findfile "COLDET.lsp"))
+    ((acad:strp (findfile "COLDET.lsp"))
      (vl-filename-directory (findfile "COLDET.lsp")))
     (t nil)))
 
 ;;; ─── המרת מחרוזת למספר שלם (atoi/fix/read לא קיימים ב-ZWCAD) ──
 (defun cdt-sint (s / len c1 c2 c3 fl)
-  (setq fl (open "C:\\Users\\Owner\\Desktop\\coldet_log.txt" "a"))
+  (setq fl (open (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\log\\coldet.log") "a"))
   (if fl (progn (write-line (strcat "[SINT] s=" s) fl) (close fl)))
   (setq len (strlen s)
         c1  (- (ascii (substr s 1 1)) 48))
-  (setq fl (open "C:\\Users\\Owner\\Desktop\\coldet_log.txt" "a"))
+  (setq fl (open (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\log\\coldet.log") "a"))
   (if fl (progn (write-line (strcat "[SINT] c1=" (itoa c1)) fl) (close fl)))
-  (setq fl (open "C:\\Users\\Owner\\Desktop\\coldet_log.txt" "a"))
+  (setq fl (open (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\log\\coldet.log") "a"))
   (if fl (progn (write-line "[SINT] pre-if" fl) (close fl)))
   (if (< (strlen s) 2)
     (progn
-      (setq fl (open "C:\\Users\\Owner\\Desktop\\coldet_log.txt" "a"))
+      (setq fl (open (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\log\\coldet.log") "a"))
       (if fl (progn (write-line "[SINT] then-c1" fl) (close fl)))
       c1)
     (if (< (strlen s) 3)
@@ -41,7 +51,7 @@
         (+ (* 100 c1) (* 10 c2) c3)))))
 
 ;;; ─── לוג לקובץ ──────────────────────────────────────────────
-(setq *cdt-log-path* "C:\\Users\\Owner\\Desktop\\coldet_log.txt")
+(setq *cdt-log-path* (strcat (getenv "USERPROFILE") "\\Desktop\\claude\\Acad\\log\\coldet.log"))
 
 (defun cdt:log-clear ()
   (setq f (open *cdt-log-path* "w"))
@@ -77,9 +87,9 @@
 
 (defun cdt:settings-path ()
   (cond
-    ((stringp *cdt-lsp-dir*)
+    ((acad:strp *cdt-lsp-dir*)
      (strcat *cdt-lsp-dir* "\\coldet_settings.dat"))
-    ((stringp (getenv "USERPROFILE"))
+    ((acad:strp (getenv "USERPROFILE"))
      (strcat (getenv "USERPROFILE")
              "\\Desktop\\claude\\Acad\\coldet\\coldet_settings.dat"))
     (t "C:\\Users\\Owner\\Desktop\\claude\\Acad\\coldet\\coldet_settings.dat")))
@@ -387,7 +397,9 @@
 (defun cdt:ensure-linetype (lt)
   ; טוען סוג קו (למשל CENTER) אם אינו קיים בסרטוט
   (if (not (tblsearch "LTYPE" lt))
-    (vl-catch-all-apply 'command (list "_.-LINETYPE" "_Load" lt "acad.lin" ""))))
+    ;; ⚠️ command חייבת להיעטף ב-lambda — apply עליה קורס באוטוקאד
+    (vl-catch-all-apply
+      '(lambda () (command "_.-LINETYPE" "_Load" lt "acad.lin" "")) nil)))
 
 (defun cdt:set-center-lt (e / ed)
   ; קובע סוג-קו CENTER ו-LTScale=1 ישירות על הישות (בלי לגעת ב-CELTYPE הגלובלי)
@@ -402,7 +414,7 @@
 (defun cdt:draw-text-center (pt height style txt layer angle mirror / ename use-style base-list)
   (cdt:ensure-layer layer)
   (setq use-style
-    (if (and style (stringp style) (not (equal style "")) (tblsearch "STYLE" style))
+    (if (and style (acad:strp style) (not (equal style "")) (tblsearch "STYLE" style))
       style
       "Standard"))
   (setq base-list
@@ -1151,15 +1163,15 @@
 
 (defun cdt:lsp-dir () *cdt-lsp-dir*)
 
-(defun cdt:str-or-empty (v) (if (stringp v) v ""))
+(defun cdt:str-or-empty (v) (if (acad:strp v) v ""))
 
 (defun cdt:ensure-layer (name)
-  (if (and name (stringp name) (not (equal name ""))
+  (if (and name (acad:strp name) (not (equal name ""))
            (not (tblsearch "LAYER" name)))
     (command "_.LAYER" "N" name "")))
 
 (defun cdt:color-str (v)
-  (if (and v (stringp v) (not (equal v ""))) v "256"))
+  (if (and v (acad:strp v) (not (equal v ""))) v "256"))
 
 (defun cdt:pick-color (tile-key / c)
   (setq c (acad_colordlg (cdt-sint (cdt:color-str (get_tile tile-key))) nil))
@@ -1184,7 +1196,7 @@
 (defun cdt:get-all-layers (/ result tblent)
   (setq result nil  tblent (tblnext "LAYER" T))
   (while tblent
-    (if (stringp (cdr (assoc 2 tblent)))
+    (if (acad:strp (cdr (assoc 2 tblent)))
       (setq result (append result (list (cdr (assoc 2 tblent))))))
     (setq tblent (tblnext "LAYER")))
   (if result result (list "0")))
@@ -1192,7 +1204,7 @@
 (defun cdt:get-all-dimstyles (/ result tblent)
   (setq result nil  tblent (tblnext "DIMSTYLE" T))
   (while tblent
-    (if (stringp (cdr (assoc 2 tblent)))
+    (if (acad:strp (cdr (assoc 2 tblent)))
       (setq result (append result (list (cdr (assoc 2 tblent))))))
     (setq tblent (tblnext "DIMSTYLE")))
   (if result result (list "Standard")))
@@ -1200,7 +1212,7 @@
 (defun cdt:get-all-txtstyles (/ result tblent)
   (setq result nil  tblent (tblnext "STYLE" T))
   (while tblent
-    (if (stringp (cdr (assoc 2 tblent)))
+    (if (acad:strp (cdr (assoc 2 tblent)))
       (setq result (append result (list (cdr (assoc 2 tblent))))))
     (setq tblent (tblnext "STYLE")))
   (if result result (list "Standard")))
@@ -1659,7 +1671,7 @@
                               tb txt-w line-len use-style)
   ; conn-pt = הקצה השמאלי של הקו (נקודת האלכסון מהפינה הימנית-תחתונה); הבלוק נמתח ימינה
   (setq txt (strcat (itoa qty) bar-char bar-diam
-                    (if (and (stringp bar-len) (> (strlen bar-len) 0)
+                    (if (and (acad:strp bar-len) (> (strlen bar-len) 0)
                              (not (equal bar-len "0")))
                       (strcat " L=" bar-len) ""))
         lx         (car  conn-pt)
@@ -3390,14 +3402,19 @@
            (ssadd blk-e blk-ss)
            (setq blk-e (entnext blk-e)))
 
+         (cdt:log (strcat "[L51] blk-ss count=" (itoa (sslength blk-ss))))
          (if (> (sslength blk-ss) 0)
            (progn
-             ;; שם בלוק: CDT_ + מספר עמוד או חותמת זמן
-             (setq blk-name
-               (strcat "CDT_"
-                 (if (and col-num (not (equal col-num "")))
-                   col-num
-                   (rtos (getvar "DATE") 2 0))))
+             ;; שם הבלוק — חותמת זמן מספרית בלבד.
+             ;; אסור לגזור אותו מהטקסט שהמשתמש הקליד: רווח בתוך מחרוזת
+             ;; שנשלחת ל-(command ...) מתפקד כ-Enter. השם נחתך ברווח,
+             ;; והמילה שאחריו נדחפת לפרומפט הבא — "נקודת בסיס" — ואז
+             ;; AutoCAD נופלת עם "Point or option keyword required".
+             ;; ZWCAD לא מפרקת מחרוזת ככה, ולכן שם זה עבד.
+             ;; לשם ממילא אין ערך: הבלוק מפוצץ מיד אחרי ההצבה.
+             ;; אותה תבנית בדיוק כמו beams.lsp, שעובד באוטוקאד.
+             (setq blk-name (strcat "CDT_" (rtos (* 100000.0 (getvar "DATE")) 2 0)))
+             (cdt:log (strcat "[L52] blk-name=" blk-name))
 
              ;; נקודת בסיס = פינה שמאל-תחתית
              (setq blk-base
@@ -3413,18 +3430,24 @@
              (if (tblsearch "BLOCK" blk-name)
                (command "_.BLOCK" blk-name "Yes" blk-base blk-ss "")
                (command "_.BLOCK" blk-name blk-base blk-ss ""))
+             (cdt:log "[L53] after BLOCK")
 
              ;; הנחת הבלוק — PAUSE: הבלוק עוקב אחרי הסמן עד לחיצה
              (princ "\nPlace block (pick insertion point): ")
              (command "_.INSERT" blk-name PAUSE 1 1 0)
+             (cdt:log "[L54] after INSERT")
              ;; פיצוץ אוטומטי — מחזיר לישויות בודדות (רק אם אכן נוצר בלוק)
              (setq ins-ent (entlast))
              (if (and ins-ent (= (cdr (assoc 0 (entget ins-ent))) "INSERT"))
-               (command "_.EXPLODE" ins-ent))))
+               (progn
+                 (command "_.EXPLODE" ins-ent)
+                 (cdt:log "[L55] after EXPLODE"))
+               (cdt:log "[L55] no INSERT to explode (placement cancelled?)"))))
 
          ;; שחזור OSNAP
          (setvar "OSMODE" prev-osmode)
 
+         (cdt:log "[L60] COLDET complete")
          (princ "\nCOLDET complete.")))))
 
   (princ))
