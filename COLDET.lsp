@@ -2274,17 +2274,24 @@
   ;; טעינת הגדרות
   (setq cfg-saved (cdt:load))
   (setq cfg (cdt:merge-cfg cfg-saved (cdt:defaults)))
+  (cdt:log (strcat "[S01] settings file "
+                   (if cfg-saved "loaded" "NOT FOUND — first-run defaults")))
 
   ;; תפריט פתיחה — DCL
   (setq start-code nil)
   (setq dlg-start (load_dialog "COLDET"))
+  (cdt:log (strcat "[S02] load_dialog \"COLDET\" -> "
+                   (vl-princ-to-string dlg-start)))
   (if (or (null dlg-start) (not (numberp dlg-start)) (< dlg-start 0))
     (progn
       (setq ldir (cdt:lsp-dir))
-      (if ldir (setq dlg-start (load_dialog (strcat ldir "\\COLDET.dcl"))))))
+      (if ldir (setq dlg-start (load_dialog (strcat ldir "\\COLDET.dcl"))))
+      (cdt:log (strcat "[S03] fallback dir=" (if ldir ldir "nil")
+                       " -> " (vl-princ-to-string dlg-start)))))
   (if (and (numberp dlg-start) (>= dlg-start 0)
            (new_dialog "coldet_start" dlg-start))
     (progn
+      (cdt:log "[S04] start dialog opened")
       (action_tile "start_settings" "(progn (setq *cdt-start-code* 1) (done_dialog 0))")
       (action_tile "start_run"      "(progn (setq *cdt-start-code* 2) (done_dialog 0))")
       (action_tile "start_cancel"   "(progn (setq *cdt-start-code* 0) (done_dialog 0))")
@@ -2292,7 +2299,11 @@
       (start_dialog)
       (unload_dialog dlg-start)
       (setq start-code *cdt-start-code*))
-    (setq start-code 2))
+    (progn
+      (cdt:log "[S04] start dialog DID NOT OPEN — falling through to Run")
+      (setq start-code 2)))
+  (cdt:log (strcat "[S05] start-code=" (vl-princ-to-string start-code)
+                   " (1=settings 2=run 0=cancel nil=closed with X)"))
 
   (cond
     ;; הגדרות
@@ -2309,6 +2320,9 @@
        (setq cfg (cdt:settings-dialog cfg)))
 
      ;; בחירת סוג צורה ידנית — לפני בחירת הפוליגון
+     ;; ⚠️ זו שאלה בשורת הפקודה. אם שורת הפקודה מוסתרת אצל המשתמש,
+     ;; הוא לא רואה אותה והפקודה נראית כאילו "לא קרה כלום".
+     (cdt:log "[S06] asking shape type at command line")
      (initget "REC L T Z U CIR CUSTOM")
      (setq shape-kw (getkword "\nShape type [REC/L/T/Z/U/CIR/CUSTOM] <REC>: "))
      (if (null shape-kw) (setq shape-kw "REC"))   ; Enter = ריבוע
